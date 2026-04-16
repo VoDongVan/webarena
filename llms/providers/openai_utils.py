@@ -147,6 +147,8 @@ def generate_from_openai_completion(
         )
     openai.api_key = os.environ["OPENAI_API_KEY"]
     openai.organization = os.environ.get("OPENAI_ORGANIZATION", "")
+    if "OPENAI_API_BASE" in os.environ:
+        openai.api_base = os.environ["OPENAI_API_BASE"]
     response = openai.Completion.create(  # type: ignore
         prompt=prompt,
         engine=engine,
@@ -252,6 +254,8 @@ def generate_from_openai_chat_completion(
         )
     openai.api_key = os.environ["OPENAI_API_KEY"]
     openai.organization = os.environ.get("OPENAI_ORGANIZATION", "")
+    if "OPENAI_API_BASE" in os.environ:
+        openai.api_base = os.environ["OPENAI_API_BASE"]
 
     response = openai.ChatCompletion.create(  # type: ignore
         model=model,

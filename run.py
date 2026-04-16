@@ -141,6 +141,12 @@ def config() -> argparse.Namespace:
     # example config
     parser.add_argument("--test_start_idx", type=int, default=0)
     parser.add_argument("--test_end_idx", type=int, default=1000)
+    parser.add_argument(
+        "--exclude_sites",
+        nargs="*",
+        default=["map"],
+        help="Skip tasks that involve any of these site names (e.g. --exclude_sites map)",
+    )
 
     # logging related
     parser.add_argument("--result_dir", type=str, default="")
@@ -412,9 +418,9 @@ def dump_config(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
-    args = config()
+    args = config() # config for experiment
     args.sleep_after_execution = 2.0
-    prepare(args)
+    prepare(args) # Prepare prompt files, output + logs directories
 
     test_file_list = []
     st_idx = args.test_start_idx
@@ -423,6 +429,23 @@ if __name__ == "__main__":
         test_file_list.append(f"config_files/{i}.json")
     if "debug" not in args.result_dir:
         test_file_list = get_unfinished(test_file_list, args.result_dir)
+
+    if args.exclude_sites:
+        exclude = set(args.exclude_sites)
+        filtered = []
+        for f in test_file_list:
+            try:
+                with open(f) as fp:
+                    sites = set(json.load(fp).get("sites", []))
+            except FileNotFoundError:
+                continue
+            if not sites.intersection(exclude):
+                filtered.append(f)
+        logger.info(
+            f"Excluded {len(test_file_list) - len(filtered)} tasks "
+            f"with sites {list(exclude)}. {len(filtered)} tasks remaining."
+        )
+        test_file_list = filtered
 
     if len(test_file_list) == 0:
         logger.info("No task left to run")

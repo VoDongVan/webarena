@@ -1,5 +1,6 @@
 """Implements helper functions to assist evaluation cases where other evaluators are not suitable."""
 import json
+import os
 from typing import Any
 from urllib.parse import urlparse
 
@@ -144,7 +145,12 @@ def gitlab_get_project_memeber_role(page: Page, account_name: str) -> str:
 
 
 def llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
-    """Check whether the prediction matches the reference with GPT4-turbo"""
+    """Check whether the prediction matches the reference with an LLM judge.
+
+    The model used is controlled by the EVAL_LLM_MODEL environment variable
+    (default: gpt-4-1106-preview). Set OPENAI_API_BASE to redirect to a
+    local vLLM endpoint.
+    """
     messages: list[dict[str, Any]] = []
     # construct the question to ask
     message = "Help a teacher to grade the answer of a student given a question. Keep in mind that the student may use different phrasing or wording to answer the question. The goal is to evaluate whether the answer is semantically equivalent to the reference answer.\n"
@@ -158,8 +164,9 @@ def llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
         {"role": "user", "content": message},
     ]
 
+    eval_model = os.environ.get("EVAL_LLM_MODEL", "gpt-4-1106-preview")
     response = generate_from_openai_chat_completion(
-        model="gpt-4-1106-preview",
+        model=eval_model,
         messages=messages,
         temperature=0,
         max_tokens=768,
@@ -174,7 +181,12 @@ def llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
 
 
 def llm_ua_match(pred: str, reference: str, question: str) -> float:
-    """Check whether the prediction matches the reference with GPT-turbo"""
+    """Check whether the prediction matches the reference with an LLM judge.
+
+    The model used is controlled by the EVAL_LLM_MODEL environment variable
+    (default: gpt-4-1106-preview). Set OPENAI_API_BASE to redirect to a
+    local vLLM endpoint.
+    """
     messages: list[dict[str, Any]] = []
     # construct the question to ask
     message = ""
@@ -193,8 +205,9 @@ def llm_ua_match(pred: str, reference: str, question: str) -> float:
         {"role": "user", "content": message},
     ]
 
+    eval_model = os.environ.get("EVAL_LLM_MODEL", "gpt-4-1106-preview")
     response = generate_from_openai_chat_completion(
-        model="gpt-4-1106-preview",
+        model=eval_model,
         messages=messages,
         temperature=0,
         max_tokens=768,
