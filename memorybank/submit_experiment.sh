@@ -54,6 +54,9 @@ echo "Resolved model: $MODEL_NAME"
 if [[ "$MODEL_NAME" =~ 27B ]]; then
     GPU_CONSTRAINT="vram80"
     TIME="6:00:00"
+elif [[ "$MODEL_NAME" =~ 0\.8B ]]; then
+    GPU_CONSTRAINT="vram16|vram23|vram40"
+    TIME="1:00:00"
 elif [[ "$MODEL_NAME" =~ 8B ]]; then
     GPU_CONSTRAINT="vram40|vram48"
     TIME="3:00:00"

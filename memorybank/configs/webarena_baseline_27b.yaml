@@ -1,9 +1,8 @@
-# WebArena baseline data generation — no memory retrieval
-# Use this to measure agent performance without retrieved memories.
-# Run: python scripts/webarena/run_webarena_baseline.py --config configs/webarena/webarena_baseline.yaml
+# WebArena baseline — Qwen3.5-27B
+# Full run using 27B model on vram80 GPU
 
 # --- LLM ---
-llm_config_name: qwen3_0.8b
+llm_config_name: qwen3_27b
 extraction_llm_config_name: null
 retrieval_query_llm_config_name: null
 
@@ -30,7 +29,7 @@ homepage_url: ""
 obs_max_tokens: null
 
 # --- Parallelism ---
-num_workers: 2  # 4→2: reduces concurrent logins to avoid Playwright Locator.fill 30s timeout
+num_workers: 2
 
 # --- Memory / retrieval ---
 retriever_server_url: ""   # Empty = retrieval disabled (baseline)
@@ -38,14 +37,14 @@ top_k: 3
 retrieve_every_n_steps: 1
 max_memories_per_task: 3
 query_history_turns: 3
-extraction_mode: single    # No rollout comparison needed for baseline
-warmup_tasks: 0            # No warmup for baseline (no retrieval to warm up)
+extraction_mode: single
+warmup_tasks: 0
 embedding_server_url: ""
 embedding_model_name: ""
 similarity_threshold: 0.0
 
 # --- Output ---
-trajectories_dir: webarena_trajectories/baseline_8b
-memory_save_path: webarena_memory_bank_baseline_8b.json   # Saved but not used for retrieval
-log_dir: logs/webarena_baseline_8b
+trajectories_dir: webarena_trajectories/baseline_27b
+memory_save_path: webarena_memory_bank_baseline_27b.json
+log_dir: logs/webarena_baseline_27b
 filename_pattern: "{task_id}_{rollout_id}"

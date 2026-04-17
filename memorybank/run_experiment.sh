@@ -152,12 +152,16 @@ export OPENAI_API_KEY="${VLLM_API_KEY}"
 ########################################
 # Run experiment
 ########################################
+# Give services extra time after HTTP-200 before login forms are usable
+sleep 60
+
+# Ensure project root is in Python path regardless of how scripts are invoked
+export PYTHONPATH="$PROJ:${PYTHONPATH:-}"
 
 echo "=== Running experiment ==="
 python "$PROJ/scripts/generate_test_data.py"
 
 mkdir -p ./.auth
-python "$PROJ/browser_env/auto_login.py"
 
 python run.py \
   --instruction_path agent/prompts/jsons/p_cot_id_actree_2s.json \
