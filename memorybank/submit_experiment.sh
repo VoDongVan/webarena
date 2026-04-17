@@ -54,29 +54,36 @@ echo "Resolved model: $MODEL_NAME"
 if [[ "$MODEL_NAME" =~ 27B ]]; then
     GPU_CONSTRAINT="vram80"
     TIME="6:00:00"
+    PARTITION="superpod-a100"
 elif [[ "$MODEL_NAME" =~ 0\.8B ]]; then
     GPU_CONSTRAINT="vram16|vram23|vram40"
     TIME="1:00:00"
+    PARTITION="gpu"
 elif [[ "$MODEL_NAME" =~ 8B ]]; then
-    GPU_CONSTRAINT="vram40|vram48"
+    GPU_CONSTRAINT="vram80"
     TIME="3:00:00"
+    PARTITION="superpod-a100"
 elif [[ "$MODEL_NAME" =~ 4B ]]; then
     GPU_CONSTRAINT="vram23|vram40"
     TIME="2:00:00"
+    PARTITION="gpu"
 else
     echo "WARNING: Unknown model size, defaulting to safe config"
     GPU_CONSTRAINT="vram40|vram48|vram80"
     TIME="4:00:00"
+    PARTITION="superpod-a100"
 fi
 
 echo "Selected GPU constraint: $GPU_CONSTRAINT"
 echo "Selected time: $TIME"
+echo "Selected partition: $PARTITION"
 
 ########################################
 # Submit job
 ########################################
 sbatch \
     --job-name="wa_$(basename $CONFIG_PATH .yaml)" \
+    --partition="$PARTITION" \
     --constraint="$GPU_CONSTRAINT" \
     --time="$TIME" \
     --export=ALL,WEBARENA_CONFIG="$CONFIG_PATH",MODEL_NAME="$MODEL_NAME" \
