@@ -14,6 +14,7 @@ Quick-reference docs covering the full codebase. Read these instead of re-explor
 | [llms.md](llms.md) | `llms/` — LMConfig, call_llm() dispatcher, OpenAI/HuggingFace providers, Tokenizer, retry logic |
 | [evaluation_harness.md](evaluation_harness.md) | `evaluation_harness/` — StringEvaluator, URLEvaluator, HTMLContentEvaluator, site API helpers, LLM fuzzy match |
 | [run.md](run.md) | `run.py` — CLI args, startup sequence, per-task loop, early stopping, trajectory structure, output files |
+| [hpc_deployment.md](hpc_deployment.md) | UMass Unity HPC setup — Apptainer services, vLLM backend, SLURM workflow, model configs, known issues |
 
 ---
 
