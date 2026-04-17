@@ -1,0 +1,98 @@
+default: "openai_proxy"
+clients:
+  openai_proxy:
+    client_type: "base"
+    name: "openai_proxy"
+    url: "http://localhost:8011/v1"
+    model_name: "gpt-4o-mini"
+    default_temperature: 0.7
+    default_max_tokens: 8192
+    api_key_env_var: "OPENAI_API_KEY"
+  
+  qwen3:
+    client_type: "qwen3"
+    name: "qwen3"
+    url: "http://localhost:8010/v1"
+    model_name: "Qwen/Qwen3-8B"
+    default_temperature: 0.6
+    default_max_tokens: 4096  # 10000→4096: avoids HTTP ReadTimeout on long generations
+    default_top_p: 0.95
+    default_stop: []
+    api_key_env_var: "VLLM_API_KEY"
+    default_presence_penalty: 1.5
+  
+  openai_gpt5:
+    client_type: "gpt5"
+    name: "openai_gpt5"
+    url: "https://api.openai.com/v1"
+    model_name: "gpt-5-mini"
+    default_temperature: 1
+    default_max_tokens: 8192
+    api_key_env_var: "OPENAI_API_KEY"
+  
+  qwen3_9b:
+    client_type: "qwen3"
+    name: "qwen3_9b"
+    url: "http://localhost:8010/v1"
+    model_name: "Qwen/Qwen3.5-9B"
+    default_temperature: 0.6
+    default_max_tokens: 10000
+    default_top_p: 0.95
+    default_stop: []
+    api_key_env_var: "VLLM_API_KEY"
+    default_presence_penalty: 1.5
+    enable_thinking: true
+
+  qwen3_27b:
+    client_type: "qwen3"
+    name: "qwen3_27b"
+    url: "http://localhost:8010/v1"
+    model_name: "Qwen/Qwen3.5-27B"
+    default_temperature: 0.6
+    default_max_tokens: 10000
+    default_top_p: 0.95
+    default_stop: []
+    api_key_env_var: "VLLM_API_KEY"
+    default_presence_penalty: 1.5
+    enable_thinking: true
+
+  qwen3_4b:
+    client_type: "qwen3"
+    name: "qwen3_4b"
+    url: "http://localhost:8010/v1"
+    model_name: "Qwen/Qwen3.5-4B"
+    default_temperature: 0.6
+    default_max_tokens: 4096
+    default_top_p: 0.95
+    default_stop: []
+    api_key_env_var: "VLLM_API_KEY"
+    default_presence_penalty: 1.5
+    enable_thinking: true
+
+  qwen3_0.8b:
+    client_type: "qwen3"
+    name: "qwen3_0.8b"
+    url: "http://localhost:8010/v1"
+    model_name: "Qwen/Qwen3.5-0.8B"
+    default_temperature: 0.6
+    default_max_tokens: 4096
+    default_top_p: 0.95
+    default_stop: []
+    api_key_env_var: "VLLM_API_KEY"
+    default_presence_penalty: 1.5
+    enable_thinking: true
+
+  fake_server:
+    client_type: "base"
+    name: "fake_server"
+    url: "http://localhost:8000/v1"
+    model_name: "fake-model"
+    default_temperature: 0.7
+    default_max_tokens: 256
+    api_key_env_var: "FAKE_API_KEY"
+
+  fake_extraction_server:
+    client_type: "base"
+    name: "fake_extraction_server"
+    url: "http://localhost:8020/v1"
+    model_name: "fake-extraction-model"

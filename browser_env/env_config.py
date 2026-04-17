@@ -31,7 +31,7 @@ assert (
 
 ACCOUNTS = {
     "reddit": {"username": "MarvelsGrantMan136", "password": "test1234"},
-    "gitlab": {"username": "byteblaze", "password": "hello1234"},
+    "gitlab": {"username": "root", "password": "webarena1234!"},
     "shopping": {
         "username": "emma.lopez@gmail.com",
         "password": "Password.123",

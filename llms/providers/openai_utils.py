@@ -1,4 +1,4 @@
-"""Tools to generate from OpenAI prompts.
+"""Tools to generate from OpenAI-compatible prompts (vLLM backend).
 Adopted from https://github.com/zeno-ml/zeno-build/"""
 
 import asyncio
@@ -10,8 +10,39 @@ from typing import Any
 
 import aiolimiter
 import openai
-import openai.error
+from openai import AsyncOpenAI, OpenAI
 from tqdm.asyncio import tqdm_asyncio
+
+# ---------------------------------------------------------------------------
+# Lazy client singletons — created on first use, not at import time.
+# Configure via env vars:
+#   VLLM_API_BASE  (default: http://localhost:8010/v1)
+#   VLLM_API_KEY   (default: abc)
+# ---------------------------------------------------------------------------
+_client: OpenAI | None = None
+_aclient: AsyncOpenAI | None = None
+
+
+def _get_base_url() -> str:
+    return os.environ.get("VLLM_API_BASE", "http://localhost:8010/v1")
+
+
+def _get_api_key() -> str:
+    return os.environ.get("VLLM_API_KEY", os.environ.get("OPENAI_API_KEY", "abc"))
+
+
+def _client_sync() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI(api_key=_get_api_key(), base_url=_get_base_url())
+    return _client
+
+
+def _client_async() -> AsyncOpenAI:
+    global _aclient
+    if _aclient is None:
+        _aclient = AsyncOpenAI(api_key=_get_api_key(), base_url=_get_base_url())
+    return _aclient
 
 
 def retry_with_exponential_backoff(  # type: ignore
@@ -20,37 +51,26 @@ def retry_with_exponential_backoff(  # type: ignore
     exponential_base: float = 2,
     jitter: bool = True,
     max_retries: int = 3,
-    errors: tuple[Any] = (openai.error.RateLimitError,),
+    errors: tuple[Any] = (openai.RateLimitError,),
 ):
     """Retry a function with exponential backoff."""
 
     def wrapper(*args, **kwargs):  # type: ignore
-        # Initialize variables
         num_retries = 0
         delay = initial_delay
 
-        # Loop until a successful response or max_retries is hit or an exception is raised
         while True:
             try:
                 return func(*args, **kwargs)
-            # Retry on specified errors
             except errors as e:
-                # Increment retries
                 num_retries += 1
-
-                # Check if max retries has been reached
                 if num_retries > max_retries:
                     raise Exception(
                         f"Maximum number of retries ({max_retries}) exceeded."
                     )
-
-                # Increment the delay
                 delay *= exponential_base * (1 + jitter * random.random())
                 print(f"Retrying in {delay} seconds.")
-                # Sleep for the delay
                 time.sleep(delay)
-
-            # Raise exceptions for any errors not specified
             except Exception as e:
                 raise e
 
@@ -64,26 +84,26 @@ async def _throttled_openai_completion_acreate(
     max_tokens: int,
     top_p: float,
     limiter: aiolimiter.AsyncLimiter,
-) -> dict[str, Any]:
+) -> Any:
     async with limiter:
         for _ in range(3):
             try:
-                return await openai.Completion.acreate(  # type: ignore
-                    engine=engine,
+                return await _client_async().completions.create(
+                    model=engine,
                     prompt=prompt,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     top_p=top_p,
                 )
-            except openai.error.RateLimitError:
+            except openai.RateLimitError:
                 logging.warning(
                     "OpenAI API rate limit exceeded. Sleeping for 10 seconds."
                 )
                 await asyncio.sleep(10)
-            except openai.error.APIError as e:
+            except openai.APIError as e:
                 logging.warning(f"OpenAI API error: {e}")
                 break
-        return {"choices": [{"message": {"content": ""}}]}
+        return None
 
 
 async def agenerate_from_openai_completion(
@@ -99,6 +119,7 @@ async def agenerate_from_openai_completion(
 
     Args:
         prompts: list of prompts
+        engine: Model name.
         temperature: Temperature to use.
         max_tokens: Maximum number of tokens to generate.
         top_p: Top p to use.
@@ -108,13 +129,6 @@ async def agenerate_from_openai_completion(
     Returns:
         List of generated responses.
     """
-    if "OPENAI_API_KEY" not in os.environ:
-        raise ValueError(
-            "OPENAI_API_KEY environment variable must be set when using OpenAI API."
-        )
-    openai.api_key = os.environ["OPENAI_API_KEY"]
-    openai.organization = os.environ.get("OPENAI_ORGANIZATION", "")
-
     limiter = aiolimiter.AsyncLimiter(requests_per_minute)
     async_responses = [
         _throttled_openai_completion_acreate(
@@ -128,7 +142,7 @@ async def agenerate_from_openai_completion(
         for prompt in prompts
     ]
     responses = await tqdm_asyncio.gather(*async_responses)
-    return [x["choices"][0]["text"] for x in responses]
+    return [r.choices[0].text if r is not None else "" for r in responses]
 
 
 @retry_with_exponential_backoff
@@ -141,23 +155,15 @@ def generate_from_openai_completion(
     context_length: int,
     stop_token: str | None = None,
 ) -> str:
-    if "OPENAI_API_KEY" not in os.environ:
-        raise ValueError(
-            "OPENAI_API_KEY environment variable must be set when using OpenAI API."
-        )
-    openai.api_key = os.environ["OPENAI_API_KEY"]
-    openai.organization = os.environ.get("OPENAI_ORGANIZATION", "")
-    if "OPENAI_API_BASE" in os.environ:
-        openai.api_base = os.environ["OPENAI_API_BASE"]
-    response = openai.Completion.create(  # type: ignore
+    response = _client_sync().completions.create(
+        model=engine,
         prompt=prompt,
-        engine=engine,
         temperature=temperature,
         max_tokens=max_tokens,
         top_p=top_p,
-        stop=[stop_token],
+        stop=[stop_token] if stop_token else None,
     )
-    answer: str = response["choices"][0]["text"]
+    answer: str = response.choices[0].text
     return answer
 
 
@@ -168,18 +174,18 @@ async def _throttled_openai_chat_completion_acreate(
     max_tokens: int,
     top_p: float,
     limiter: aiolimiter.AsyncLimiter,
-) -> dict[str, Any]:
+) -> Any:
     async with limiter:
         for _ in range(3):
             try:
-                return await openai.ChatCompletion.acreate(  # type: ignore
+                return await _client_async().chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     top_p=top_p,
                 )
-            except openai.error.RateLimitError:
+            except openai.RateLimitError:
                 logging.warning(
                     "OpenAI API rate limit exceeded. Sleeping for 10 seconds."
                 )
@@ -187,10 +193,10 @@ async def _throttled_openai_chat_completion_acreate(
             except asyncio.exceptions.TimeoutError:
                 logging.warning("OpenAI API timeout. Sleeping for 10 seconds.")
                 await asyncio.sleep(10)
-            except openai.error.APIError as e:
+            except openai.APIError as e:
                 logging.warning(f"OpenAI API error: {e}")
                 break
-        return {"choices": [{"message": {"content": ""}}]}
+        return None
 
 
 async def agenerate_from_openai_chat_completion(
@@ -206,6 +212,7 @@ async def agenerate_from_openai_chat_completion(
 
     Args:
         messages_list: list of message list
+        engine: Model name.
         temperature: Temperature to use.
         max_tokens: Maximum number of tokens to generate.
         top_p: Top p to use.
@@ -215,13 +222,6 @@ async def agenerate_from_openai_chat_completion(
     Returns:
         List of generated responses.
     """
-    if "OPENAI_API_KEY" not in os.environ:
-        raise ValueError(
-            "OPENAI_API_KEY environment variable must be set when using OpenAI API."
-        )
-    openai.api_key = os.environ["OPENAI_API_KEY"]
-    openai.organization = os.environ.get("OPENAI_ORGANIZATION", "")
-
     limiter = aiolimiter.AsyncLimiter(requests_per_minute)
     async_responses = [
         _throttled_openai_chat_completion_acreate(
@@ -235,7 +235,9 @@ async def agenerate_from_openai_chat_completion(
         for message in messages_list
     ]
     responses = await tqdm_asyncio.gather(*async_responses)
-    return [x["choices"][0]["message"]["content"] for x in responses]
+    return [
+        r.choices[0].message.content if r is not None else "" for r in responses
+    ]
 
 
 @retry_with_exponential_backoff
@@ -248,16 +250,7 @@ def generate_from_openai_chat_completion(
     context_length: int,
     stop_token: str | None = None,
 ) -> str:
-    if "OPENAI_API_KEY" not in os.environ:
-        raise ValueError(
-            "OPENAI_API_KEY environment variable must be set when using OpenAI API."
-        )
-    openai.api_key = os.environ["OPENAI_API_KEY"]
-    openai.organization = os.environ.get("OPENAI_ORGANIZATION", "")
-    if "OPENAI_API_BASE" in os.environ:
-        openai.api_base = os.environ["OPENAI_API_BASE"]
-
-    response = openai.ChatCompletion.create(  # type: ignore
+    response = _client_sync().chat.completions.create(
         model=model,
         messages=messages,
         temperature=temperature,
@@ -265,7 +258,7 @@ def generate_from_openai_chat_completion(
         top_p=top_p,
         stop=[stop_token] if stop_token else None,
     )
-    answer: str = response["choices"][0]["message"]["content"]
+    answer: str = response.choices[0].message.content
     return answer
 
 
@@ -280,11 +273,5 @@ def fake_generate_from_openai_chat_completion(
     context_length: int,
     stop_token: str | None = None,
 ) -> str:
-    if "OPENAI_API_KEY" not in os.environ:
-        raise ValueError(
-            "OPENAI_API_KEY environment variable must be set when using OpenAI API."
-        )
-    openai.api_key = os.environ["OPENAI_API_KEY"]
-    openai.organization = os.environ.get("OPENAI_ORGANIZATION", "")
     answer = "Let's think step-by-step. This page shows a list of links and buttons. There is a search box with the label 'Search query'. I will click on the search box to type the query. So the action I will perform is \"click [60]\"."
     return answer

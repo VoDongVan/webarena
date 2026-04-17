@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,6 +61,9 @@ def construct_llm_config(args: argparse.Namespace) -> LMConfig:
         llm_config.gen_config["stop_token"] = args.stop_token
         llm_config.gen_config["max_obs_length"] = args.max_obs_length
         llm_config.gen_config["max_retry"] = args.max_retry
+        llm_config.gen_config["base_url"] = os.environ.get(
+            "VLLM_API_BASE", "http://localhost:8010/v1"
+        )
     else:
         raise NotImplementedError(f"provider {args.provider} not implemented")
     return llm_config
