@@ -84,7 +84,7 @@ def renew_comb(comb: list[str], auth_folder: str = "./.auth") -> None:
     if "shopping_admin" in comb:
         username = ACCOUNTS["shopping_admin"]["username"]
         password = ACCOUNTS["shopping_admin"]["password"]
-        page.goto(f"{SHOPPING_ADMIN}")
+        page.goto(f"{SHOPPING_ADMIN}/admin/")
         page.get_by_placeholder("user name").fill(username)
         page.get_by_placeholder("password").fill(password)
         page.get_by_role("button", name="Sign in").click()
