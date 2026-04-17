@@ -41,7 +41,29 @@ class PromptConstructor(object):
 
         """Return the require format for an API"""
         message: list[dict[str, str]] | str
-        if "openai" in self.lm_config.provider:
+        if self.lm_config.provider == "vllm":
+            if self.lm_config.mode == "chat":
+                message = [{"role": "system", "content": intro}]
+                for (x, y) in examples:
+                    message.append({"role": "user", "content": x})
+                    message.append({"role": "assistant", "content": y})
+                message.append({"role": "user", "content": current})
+                return message
+            elif self.lm_config.mode == "completion":
+                message = f"{intro}\n\n"
+                message += "Here are a few examples:\n"
+                for example in examples:
+                    message += f"Observation\n:{example[0]}\n\n"
+                    message += f"Action: {example[1]}\n\n"
+                message += "Now make prediction given the observation\n\n"
+                message += f"Observation\n:{current}\n\n"
+                message += "Action:"
+                return message
+            else:
+                raise ValueError(
+                    f"vLLM models do not support mode {self.lm_config.mode}"
+                )
+        elif "openai" in self.lm_config.provider:
             if self.lm_config.mode == "chat":
                 message = [{"role": "system", "content": intro}]
                 for (x, y) in examples:
