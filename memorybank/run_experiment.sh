@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J wa_baseline
-#SBATCH -p gpu,gpu-preempt
+#SBATCH -p superpod-a100
 #SBATCH -N 1
 #SBATCH -c 8
 #SBATCH --mem=40G
@@ -94,7 +94,7 @@ start_vllm() {
         --host 0.0.0.0 \
         --api-key abc \
         --gpu-memory-utilization 0.85 \
-        --max-model-len 32768 \
+        --max-model-len 128000 \
         --dtype auto \
         --reasoning-parser qwen3 \
         --trust-remote-code \
@@ -167,8 +167,9 @@ python run.py \
   --instruction_path agent/prompts/jsons/p_cot_id_actree_2s.json \
   --provider vllm \
   --model "$VLLM_MODEL" \
+  --max_tokens 2048 \
   --test_start_idx 0 \
-  --test_end_idx 1 \
+  --test_end_idx 100 \
   --exclude_sites map \
   --result_dir "$PROJ/memorybank/results"
 

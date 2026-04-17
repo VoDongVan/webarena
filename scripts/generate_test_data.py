@@ -11,7 +11,7 @@ def main() -> None:
     raw = raw.replace("__GITLAB__", GITLAB)
     raw = raw.replace("__REDDIT__", REDDIT)
     raw = raw.replace("__SHOPPING__", SHOPPING)
-    raw = raw.replace("__SHOPPING_ADMIN__", SHOPPING_ADMIN)
+    raw = raw.replace("__SHOPPING_ADMIN__", SHOPPING_ADMIN + "/admin")
     raw = raw.replace("__WIKIPEDIA__", WIKIPEDIA)
     raw = raw.replace("__MAP__", MAP)
     with open("config_files/test.json", "w") as f:
