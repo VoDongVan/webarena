@@ -226,8 +226,16 @@ Returns `EvaluatorComb` of all matching evaluators.
 
 | Function | What it does |
 |---|---|
-| `llm_fuzzy_match(pred, ref, intent)` | GPT-4-turbo: is pred semantically equivalent to ref? → 1.0/0.0 |
-| `llm_ua_match(pred, ref, intent)` | GPT-4: does pred's reason for impossibility match ref? → 1.0/0.0 |
+| `llm_fuzzy_match(pred, ref, intent)` | LLM judge: is pred semantically equivalent to ref? → 1.0/0.0 |
+| `llm_ua_match(pred, ref, intent)` | LLM judge: does pred's reason for impossibility match ref? → 1.0/0.0 |
+
+Both functions are controlled by the `EVAL_LLM_MODEL` environment variable (default: `gpt-4-1106-preview`). Set `OPENAI_API_BASE` to redirect to a local vLLM endpoint. In `run_experiment.sh`, `EVAL_LLM_MODEL` is set to the same model used for the agent (e.g. `Qwen/Qwen3.5-27B`).
+
+**Prompts** are designed to elicit a single-word verdict:
+- `llm_fuzzy_match`: system says `"Reply with exactly one word: correct, incorrect, or partially correct"`. User message ends with `"Reply with exactly one word on its own line: correct, incorrect, or partially correct."` `max_tokens` is capped at 128.
+- `llm_ua_match`: same pattern, verdict is `same` or `different`.
+
+**Parsing**: checks for `"partially correct"` / `"incorrect"` / `"correct"` as substrings (in that order of precedence). A `None` response or one that contains none of those keywords returns `0.0` (no crash).
 
 ### PseudoPage
 

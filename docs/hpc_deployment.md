@@ -58,7 +58,7 @@ wikipedia, shopping, shopping_admin).
 
 ## WebArena Services on Apptainer
 
-Each service is a separate SLURM job running on a CPU node. Startup times:
+Each service is a separate SLURM job running on a CPU node. All service jobs use a **24-hour** wall-clock limit (`#SBATCH -t 24:00:00`) to match the agent job's maximum run time. Startup times:
 
 | Service | Port | Node variable | Typical startup |
 |---|---|---|---|
@@ -203,18 +203,34 @@ Defined in `browser_env/env_config.py`. For this deployment:
 
 ---
 
-## Research Extension: memorybank/
+## Research Extension: Memory Retrieval
 
-The `memorybank/` subdirectory contains a planned research contribution:
-**agent-controlled memory retrieval**. See `MEMORY_ACTION_PLAN.md` (repo root)
-for the full design. Key ideas:
+**Agent-controlled memory retrieval is fully implemented.** The agent issues
+`retrieve_memory [query]` as an explicit action (costs 1 step); memories appear
+in the next observation under a `RETRIEVED MEMORIES:` header. After each task,
+an extraction LLM saves 1–3 generalizable `MemoryItem`s to the retriever server.
 
-- A new `retrieve_memory [query]` action lets the agent ask for past experience
-  on demand, paying 1 step per retrieval (unlike automatic per-step retrieval).
-- After each task, an extraction LLM reads the trajectory and saves 1–3
-  generalizable `MemoryItem`s to a retriever server.
-- Baseline (no memory) experiments use `memorybank/configs/webarena_baseline.yaml`.
-- Implementation is not yet started (as of 2026-04-17).
+### Running with memory
+
+1. Start the retriever server (BM25) before submitting the experiment job:
+   ```bash
+   cd /scratch3/workspace/vdvo_umass_edu-CS696_S26/memorybank
+   python retrieval/server.py --retriever_type bm25 --port 8020
+   ```
+
+2. Pass memory args to `run.py` (or set them in your experiment YAML):
+   ```bash
+   --instruction_path agent/prompts/jsons/p_cot_id_actree_2s_memory.json
+   --retriever_server_url http://localhost:8020
+   --top_k 3
+   --extraction_model Qwen/Qwen3-8B   # optional; reuses main model if omitted
+   ```
+
+3. Baseline (no memory) experiments omit `--retriever_server_url` and use
+   `p_cot_id_actree_2s.json` as the instruction path.
+
+See `MEMORY_ACTION_PLAN.md` (repo root) for the full design and
+`IMPLEMENTATION_PROGRESS.md` for the complete list of implemented files.
 
 ---
 
@@ -227,3 +243,5 @@ for the full design. Key ideas:
 | `AttributeError: module 'openai' has no attribute 'error'` | Old `openai.error` import; openai SDK ≥ 1.0 changed the API | Fixed in commit `d8def64` |
 | `vLLM failed` in job output | vLLM took > 30 min to start (rare on cold cache miss) | Re-submit; model weights should be cached in `HF_HOME` |
 | Shopping Admin node file never written | Magento cache flush or Elasticsearch slow to start | Job will retry health checks for 45 min; usually resolves |
+| `AssertionError` in evaluator / `ERR_CONNECTION_REFUSED` at end of run | WA service SLURM jobs (8h limit) expired before the agent job finished | Fixed: all service jobs now use 24h limit |
+| `AssertionError` or `AttributeError: 'NoneType'` in `llm_fuzzy_match` | Evaluator LLM response didn't contain `"correct"`/`"incorrect"` verbatim (Qwen thinks freely) | Fixed: prompts now explicitly demand a single-word verdict; `None` and unrecognized responses default to `0.0` |

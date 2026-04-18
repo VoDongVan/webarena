@@ -153,31 +153,35 @@ def llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
     """
     messages: list[dict[str, Any]] = []
     # construct the question to ask
-    message = "Help a teacher to grade the answer of a student given a question. Keep in mind that the student may use different phrasing or wording to answer the question. The goal is to evaluate whether the answer is semantically equivalent to the reference answer.\n"
-    message += f"question: {question}\n"
-    message += f"reference answer: {reference}\n"
-    message += "all the string 'N/A' that you see is a special sequence that means 'not achievable'\n"
-    message += f"student answer: {pred}\n"
-    message += "Conclude the judgement by correct/incorrect/partially correct."
+    message = "You are grading a student's answer against a reference answer. Determine whether the student's answer is semantically equivalent to the reference answer, allowing for different phrasing or wording.\n"
+    message += f"Question: {question}\n"
+    message += f"Reference answer: {reference}\n"
+    message += "Note: the string 'N/A' means 'not achievable'.\n"
+    message += f"Student answer: {pred}\n"
+    message += "\nReply with exactly one word on its own line: correct, incorrect, or partially correct."
     messages = [
-        {"role": "system", "content": "You are a helpful assistant"},
+        {"role": "system", "content": "You are a grading assistant. Reply with exactly one word: correct, incorrect, or partially correct."},
         {"role": "user", "content": message},
     ]
 
     eval_model = os.environ.get("EVAL_LLM_MODEL", "gpt-4-1106-preview")
-    response = generate_from_openai_chat_completion(
+    raw = generate_from_openai_chat_completion(
         model=eval_model,
         messages=messages,
         temperature=0,
-        max_tokens=768,
+        max_tokens=128,
         top_p=1.0,
         context_length=0,
-    ).lower()
+    )
+    if not raw:
+        return 0.0
+    response = raw.lower()
     if "partially correct" in response or "incorrect" in response:
         return 0.0
-    else:
-        assert "correct" in response
+    elif "correct" in response:
         return 1.0
+    else:
+        return 0.0
 
 
 def llm_ua_match(pred: str, reference: str, question: str) -> float:
@@ -198,27 +202,31 @@ def llm_ua_match(pred: str, reference: str, question: str) -> float:
         "An individual previously attempted this task and was unable to complete it. They provided a reason for their failure, "
         "which is listed under 'reported unachievable reason'. Your role is to review both the actual and reported reasons. "
         "Determine if the reported reason aligns with the actual reason, even if implicitly. "
-        "If the stated reason is in line with the actual reason, respond with 'same'. Otherwise, respond with 'different'."
+        "Reply with exactly one word on its own line: same or different."
     )
     messages = [
-        {"role": "system", "content": "You are a helpful assistant"},
+        {"role": "system", "content": "You are a grading assistant. Reply with exactly one word: same or different."},
         {"role": "user", "content": message},
     ]
 
     eval_model = os.environ.get("EVAL_LLM_MODEL", "gpt-4-1106-preview")
-    response = generate_from_openai_chat_completion(
+    raw = generate_from_openai_chat_completion(
         model=eval_model,
         messages=messages,
         temperature=0,
-        max_tokens=768,
+        max_tokens=128,
         top_p=1.0,
         context_length=0,
-    ).lower()
+    )
+    if not raw:
+        return 0.0
+    response = raw.lower()
     if "different" in response:
         return 0.0
-    else:
-        assert "same" in response
+    elif "same" in response:
         return 1.0
+    else:
+        return 0.0
 
 
 class PseudoPage:
