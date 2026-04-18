@@ -43,7 +43,12 @@ embedding_server_url: ""
 embedding_model_name: ""
 similarity_threshold: 0.0
 
+# --- Task selection (run.py range) ---
+test_start_idx: 0
+test_end_idx: 812
+
 # --- Output ---
+result_dir: "memorybank/results_baseline_27b"
 trajectories_dir: webarena_trajectories/baseline_27b
 memory_save_path: webarena_memory_bank_baseline_27b.json
 log_dir: logs/webarena_baseline_27b

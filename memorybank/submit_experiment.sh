@@ -24,10 +24,11 @@ PROJ=/scratch3/workspace/vdvo_umass_edu-CS696_S26/webarena/memorybank
 LLM_CLIENTS="$PROJ/configs/llm_clients.yaml"
 
 ########################################
-# Extract model from YAML
+# Extract fields from YAML
 ########################################
-MODEL_NAME=$(python3 - <<EOF
+read -r MODEL_NAME RESULT_DIR TEST_START_IDX TEST_END_IDX < <(python3 - <<EOF
 import yaml
+from pathlib import Path
 
 config_path = "$CONFIG_PATH"
 clients_path = "$LLM_CLIENTS"
@@ -42,18 +43,26 @@ with open(clients_path) as f:
 
 model = clients.get("clients", {}).get(llm_name, {}).get("model_name", "Qwen/Qwen3-8B")
 
-print(model)
+# Derive result_dir: use explicit field or fall back to config filename stem
+result_dir = cfg.get("result_dir") or f"memorybank/results_{Path(config_path).stem}"
+
+test_start = cfg.get("test_start_idx", 0)
+test_end   = cfg.get("test_end_idx",   812)
+
+print(model, result_dir, test_start, test_end)
 EOF
 )
 
-echo "Resolved model: $MODEL_NAME"
+echo "Resolved model:      $MODEL_NAME"
+echo "Result dir:          $RESULT_DIR"
+echo "Task range:          $TEST_START_IDX .. $TEST_END_IDX"
 
 ########################################
 # Map model → GPU constraint + time
 ########################################
 if [[ "$MODEL_NAME" =~ 27B ]]; then
     GPU_CONSTRAINT="vram80"
-    TIME="6:00:00"
+    TIME="24:00:00"
     PARTITION="superpod-a100"
 elif [[ "$MODEL_NAME" =~ 0\.8B ]]; then
     GPU_CONSTRAINT="vram16|vram23|vram40"
@@ -86,5 +95,5 @@ sbatch \
     --partition="$PARTITION" \
     --constraint="$GPU_CONSTRAINT" \
     --time="$TIME" \
-    --export=ALL,WEBARENA_CONFIG="$CONFIG_PATH",MODEL_NAME="$MODEL_NAME" \
+    --export=ALL,WEBARENA_CONFIG="$CONFIG_PATH",MODEL_NAME="$MODEL_NAME",RESULT_DIR="$RESULT_DIR",TEST_START_IDX="$TEST_START_IDX",TEST_END_IDX="$TEST_END_IDX" \
     run_experiment.sh

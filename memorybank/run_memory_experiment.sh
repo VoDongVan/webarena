@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J wa_baseline
+#SBATCH -J wa_memory
 #SBATCH -p superpod-a100
 #SBATCH -N 1
 #SBATCH -c 8
@@ -16,13 +16,25 @@ NODEDIR=$BUILDDIR/homepage
 
 CONFIG="${WEBARENA_CONFIG}"
 VLLM_MODEL="${MODEL_NAME}"
-RESULT_DIR="${RESULT_DIR:-memorybank/results_$(basename "$CONFIG" .yaml)}"
+
+# Memory-specific env vars (all have defaults)
+RETRIEVER_TYPE="${RETRIEVER_TYPE:-bm25}"
+RETRIEVER_PORT="${RETRIEVER_PORT:-8020}"
+TOP_K="${TOP_K:-3}"
+EXTRACTION_MODEL="${EXTRACTION_MODEL:-}"
+MEMORY_SAVE_PATH="${MEMORY_SAVE_PATH:-}"
+MEMORIES_INIT_PATH="${MEMORIES_INIT_PATH:-}"
 TEST_START_IDX="${TEST_START_IDX:-0}"
-TEST_END_IDX="${TEST_END_IDX:-812}"
+TEST_END_IDX="${TEST_END_IDX:-1}"
 
 echo "=== Starting job on $(hostname) at $(date) ==="
-echo "Config: $CONFIG"
-echo "Model: $VLLM_MODEL"
+echo "Config:         $CONFIG"
+echo "Model:          $VLLM_MODEL"
+echo "Retriever type: $RETRIEVER_TYPE  port: $RETRIEVER_PORT"
+echo "Top-k:          $TOP_K"
+echo "Extraction model: ${EXTRACTION_MODEL:-<same as main>}"
+echo "Memory save path: ${MEMORY_SAVE_PATH:-<none>}"
+echo "Task range:     $TEST_START_IDX .. $TEST_END_IDX"
 
 ########################################
 # Cleanup
@@ -30,6 +42,7 @@ echo "Model: $VLLM_MODEL"
 cleanup() {
     echo "Cleaning up..."
     [[ -n "${VLLM_PID:-}" ]] && kill $VLLM_PID 2>/dev/null || true
+    [[ -n "${RETRIEVER_PID:-}" ]] && kill $RETRIEVER_PID 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -97,7 +110,7 @@ start_vllm() {
         --host 0.0.0.0 \
         --api-key abc \
         --gpu-memory-utilization 0.85 \
-        --max-model-len 128000 \
+        --max-model-len 262144 \
         --dtype auto \
         --reasoning-parser qwen3 \
         --trust-remote-code \
@@ -118,6 +131,28 @@ start_vllm() {
 }
 
 ########################################
+# Retrieval server startup
+########################################
+start_retrieval_server() {
+    local retriever_args="--port $RETRIEVER_PORT --retriever $RETRIEVER_TYPE"
+    [[ -n "$MEMORIES_INIT_PATH" ]] && retriever_args+=" --memories $MEMORIES_INIT_PATH"
+
+    conda run -n webarena python \
+        "$PROJ/../memorybank/retrieval/server.py" $retriever_args \
+        > "$PROJ/memorybank/logs/retriever_${SLURM_JOB_ID}.log" 2>&1 &
+    RETRIEVER_PID=$!
+
+    for i in $(seq 1 30); do
+        code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "http://localhost:${RETRIEVER_PORT}/health" || true)
+        [[ "$code" == "200" ]] && return 0
+        sleep 5
+    done
+
+    return 1
+}
+
+########################################
 # Parallel startup
 ########################################
 start_webarena &
@@ -126,12 +161,17 @@ WA_PID=$!
 start_vllm &
 VLLM_INIT_PID=$!
 
-wait $WA_PID || { echo "WebArena failed"; exit 1; }
-wait $VLLM_INIT_PID || { echo "vLLM failed"; exit 1; }
+start_retrieval_server &
+RETRIEVAL_INIT_PID=$!
+
+wait $WA_PID           || { echo "WebArena startup failed"; exit 1; }
+wait $VLLM_INIT_PID    || { echo "vLLM startup failed"; exit 1; }
+wait $RETRIEVAL_INIT_PID || { echo "Retrieval server startup failed"; exit 1; }
+
+echo "=== All services ready at $(date) ==="
 
 ########################################
 # Export endpoints
-# Bridge WA_* names to what browser_env/env_config.py expects
 ########################################
 export WA_SHOPPING="http://$(cat $NODEDIR/.shopping_node):7770"
 export WA_SHOPPING_ADMIN="http://$(cat $NODEDIR/.shopping_admin_node):7780"
@@ -149,7 +189,6 @@ export WIKIPEDIA="$WA_WIKIPEDIA"
 export HOMEPAGE="$WA_HOMEPAGE"
 export MAP="$WA_MAP"
 
-# vLLM accepts any key; OPENAI_API_KEY satisfies the env-var check in openai_utils.py
 export OPENAI_API_KEY="${VLLM_API_KEY}"
 # Route the LLM-judge evaluator (fuzzy_match, ua_match) to the local vLLM model
 export EVAL_LLM_MODEL="${VLLM_MODEL}"
@@ -157,25 +196,30 @@ export EVAL_LLM_MODEL="${VLLM_MODEL}"
 ########################################
 # Run experiment
 ########################################
-# Give services extra time after HTTP-200 before login forms are usable
 sleep 60
 
-# Ensure project root is in Python path regardless of how scripts are invoked
 export PYTHONPATH="$PROJ:${PYTHONPATH:-}"
 
-echo "=== Running experiment ==="
+echo "=== Running memory retrieval experiment ==="
 python "$PROJ/scripts/generate_test_data.py"
 
 mkdir -p ./.auth
 
+# Build optional args
+MEMORY_ARGS=()
+MEMORY_ARGS+=(--retriever_server_url "http://localhost:${RETRIEVER_PORT}")
+MEMORY_ARGS+=(--top_k "$TOP_K")
+[[ -n "$EXTRACTION_MODEL" ]] && MEMORY_ARGS+=(--extraction_model "$EXTRACTION_MODEL")
+[[ -n "$MEMORY_SAVE_PATH" ]] && MEMORY_ARGS+=(--memory_save_path "$MEMORY_SAVE_PATH")
+
 python run.py \
-  --instruction_path agent/prompts/jsons/p_cot_id_actree_2s.json \
+  --instruction_path agent/prompts/jsons/p_cot_id_actree_2s_memory.json \
   --provider vllm \
   --model "$VLLM_MODEL" \
-  --max_tokens 2048 \
   --test_start_idx "$TEST_START_IDX" \
   --test_end_idx "$TEST_END_IDX" \
   --exclude_sites map \
-  --result_dir "$PROJ/$RESULT_DIR"
+  --result_dir "$PROJ/memorybank/results_memory" \
+  "${MEMORY_ARGS[@]}"
 
-echo "=== Done ==="
+echo "=== Done at $(date) ==="
