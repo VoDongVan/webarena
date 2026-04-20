@@ -19,6 +19,7 @@ from agent import (
     construct_agent,
 )
 from agent.prompts import *
+from agent.memory_client import MemoryClient
 from browser_env import (
     Action,
     ActionTypes,
@@ -115,7 +116,7 @@ def config() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default="gpt-3.5-turbo-0613")
     parser.add_argument("--mode", type=str, default="chat")
     parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--top_p", type=float, default=0.9)
+    parser.add_argument("--top_p", type=float, default=0.95)
     parser.add_argument("--context_length", type=int, default=0)
     parser.add_argument("--max_tokens", type=int, default=384)
     parser.add_argument("--stop_token", type=str, default=None)
@@ -146,6 +147,27 @@ def config() -> argparse.Namespace:
         nargs="*",
         default=["map"],
         help="Skip tasks that involve any of these site names (e.g. --exclude_sites map)",
+    )
+
+    # memory config
+    parser.add_argument(
+        "--retriever_server_url",
+        type=str,
+        default="",
+        help="URL of the retriever server (e.g. http://localhost:8020). Empty disables memory.",
+    )
+    parser.add_argument("--top_k", type=int, default=3, help="Number of memories to retrieve")
+    parser.add_argument(
+        "--extraction_model",
+        type=str,
+        default="",
+        help="Model name for the extraction LLM (uses main model if empty)",
+    )
+    parser.add_argument(
+        "--memory_save_path",
+        type=str,
+        default="",
+        help="Path to persist memory bank as JSON",
     )
 
     # logging related
@@ -224,6 +246,7 @@ def test(
     args: argparse.Namespace,
     agent: Agent | PromptAgent | TeacherForcingAgent,
     config_file_list: list[str],
+    memory_client: MemoryClient | None = None,
 ) -> None:
     scores = []
     max_steps = args.max_steps
@@ -324,6 +347,14 @@ def test(
                 if action["action_type"] == ActionTypes.STOP:
                     break
 
+                if action["action_type"] == ActionTypes.RETRIEVE_MEMORY:
+                    if memory_client:
+                        memories = memory_client.retrieve(action["answer"], args.top_k)
+                        meta_data["retrieved_memories"] = memories
+                    # browser state unchanged — re-use current state_info
+                    trajectory.append(state_info)
+                    continue
+
                 obs, _, terminated, _, info = env.step(action)
                 state_info = {"observation": obs, "info": info}
                 trajectory.append(state_info)
@@ -342,6 +373,9 @@ def test(
             )
 
             scores.append(score)
+
+            if memory_client and isinstance(agent, PromptAgent) and agent.extraction_lm_config:
+                agent.extract_and_save_memories(trajectory, intent, score)
 
             if score == 1:
                 logger.info(f"[Result] (PASS) {config_file}")
@@ -459,4 +493,18 @@ if __name__ == "__main__":
         dump_config(args)
 
         agent = construct_agent(args)
-        test(args, agent, test_file_list)
+
+        memory_client = None
+        if args.retriever_server_url:
+            memory_client = MemoryClient(args.retriever_server_url)
+            if isinstance(agent, PromptAgent):
+                agent.memory_client = memory_client
+                if args.extraction_model:
+                    from llms import lm_config as _lm_config
+                    extraction_args = argparse.Namespace(**vars(args))
+                    extraction_args.model = args.extraction_model
+                    agent.extraction_lm_config = _lm_config.construct_llm_config(extraction_args)
+                else:
+                    agent.extraction_lm_config = agent.lm_config
+
+        test(args, agent, test_file_list, memory_client=memory_client)

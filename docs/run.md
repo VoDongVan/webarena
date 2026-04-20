@@ -4,7 +4,7 @@ The entry point. Wires together the agent, browser environment, and evaluator in
 
 ---
 
-## CLI Arguments (`config()`, lines 59–158)
+## CLI Arguments (`config()`, lines 59–186)
 
 ### Browser / Environment
 
@@ -41,8 +41,8 @@ The entry point. Wires together the agent, browser environment, and evaluator in
 
 | Arg | Default | Purpose |
 |---|---|---|
-| `--provider` | `"openai"` | `"openai"` / `"huggingface"` |
-| `--model` | `"gpt-3.5-turbo-0613"` | Model name |
+| `--provider` | `"openai"` | `"vllm"` / `"openai"` / `"huggingface"` |
+| `--model` | `"gpt-3.5-turbo-0613"` | Model name (e.g. `Qwen/Qwen3-8B` for vLLM) |
 | `--mode` | `"chat"` | `"chat"` / `"completion"` |
 | `--temperature` | 1.0 | Sampling temperature |
 | `--top_p` | 0.9 | Nucleus sampling |
@@ -57,11 +57,23 @@ The entry point. Wires together the agent, browser environment, and evaluator in
 |---|---|---|
 | `--test_start_idx` | 0 | First task index to run |
 | `--test_end_idx` | 1000 | Last task index (exclusive) |
+| `--exclude_sites` | `["map"]` | Skip tasks involving these site names; map excluded by default |
 | `--result_dir` | `""` | Where to save results (auto-named if empty) |
+
+### Memory (optional)
+
+| Arg | Default | Purpose |
+|---|---|---|
+| `--retriever_server_url` | `""` | URL of retriever server (empty = memory disabled; baseline mode) |
+| `--top_k` | 3 | Number of memories to retrieve per `retrieve_memory` action |
+| `--extraction_model` | `""` | Model name for the extraction LLM; uses main model if empty |
+| `--memory_save_path` | `""` | Path to persist memory bank as JSON (passed to retriever server) |
+
+All memory args default to disabled. Passing `--retriever_server_url http://localhost:8020` enables memory. The retriever server must be running before `run.py` starts (see HPC deployment doc).
 
 ---
 
-## Startup Sequence (`main()`, lines 414–439)
+## Startup Sequence (`main()`, lines 454–511)
 
 ```
 1. args = config()
@@ -69,14 +81,21 @@ The entry point. Wires together the agent, browser environment, and evaluator in
 3. prepare(args)                         ← convert prompt .py→.json, mkdir result_dir
 4. test_file_list = config_files[start:end]
 5. test_file_list = get_unfinished(...)  ← skip already-completed tasks
-6. dump_config(args)                     ← write result_dir/config.json
-7. agent = construct_agent(args)
-8. test(args, agent, test_file_list)
+6. filter by --exclude_sites             ← drops map tasks by default
+7. dump_config(args)                     ← write result_dir/config.json
+8. agent = construct_agent(args)
+9. if --retriever_server_url:
+      memory_client = MemoryClient(url)
+      agent.memory_client = memory_client
+      agent.extraction_lm_config = (build from --extraction_model or reuse main lm_config)
+10. test(args, agent, test_file_list, memory_client=memory_client)
 ```
 
 ---
 
-## test() — The Core Loop (lines 217–365)
+## test() — The Core Loop (lines 245–405)
+
+Signature: `test(args, agent, config_file_list, memory_client=None)`
 
 ### Environment Init
 
@@ -92,19 +111,20 @@ env = ScriptBrowserEnv(
 
 ### Per-Task Steps
 
-**1. Load config + refresh cookies (lines 244–275)**
+**1. Load config + refresh cookies**
 
 Reads task JSON. If a `storage_state` path is present, calls `auto_login.py` as a subprocess to verify/renew cookies, then patches the config with the fresh cookie path.
 
-**2. Reset (lines 280–284)**
+**2. Reset**
 
 ```python
 agent.reset(config_file)
 obs, info = env.reset(options={"config_file": config_file})
 trajectory = [{"observation": obs, "info": info}]
+meta_data = {"action_history": ["None"]}
 ```
 
-**3. Action loop (lines 287–328)**
+**3. Action loop**
 
 ```
 while True:
@@ -122,20 +142,37 @@ while True:
 
     f. if action_type == STOP: break
 
-    g. obs, _, terminated, _, info = env.step(action)
-       trajectory.append({"observation": obs, "info": info})
+    g. if action_type == RETRIEVE_MEMORY:          ← memory branch
+          if memory_client:
+              memories = memory_client.retrieve(action["answer"], args.top_k)
+              meta_data["retrieved_memories"] = memories
+          trajectory.append(state_info)   ← re-append current state (browser unchanged)
+          continue                        ← skip env.step()
 
-    h. if terminated: inject STOP; break
+    h. obs, _, terminated, _, info = env.step(action)
+       state_info = {"observation": obs, "info": info}
+       trajectory.append(state_info)
+
+    i. if terminated: inject STOP; break
 ```
 
-**4. Evaluate (lines 330–336)**
+`RETRIEVE_MEMORY` counts as one step toward `max_steps` but does not advance the browser.
+
+**4. Evaluate**
 
 ```python
 evaluator = evaluator_router(config_file)
 score = evaluator(trajectory, config_file, env.page, client)
 ```
 
-**5. Log & save (lines 338–360)**
+**5. Memory extraction (if enabled)**
+
+```python
+if memory_client and isinstance(agent, PromptAgent) and agent.extraction_lm_config:
+    agent.extract_and_save_memories(trajectory, intent, score)
+```
+
+**6. Log & save**
 
 - `scores.append(score)`
 - Log `[Result] (PASS)` or `[Result] (FAIL)`
@@ -143,10 +180,10 @@ score = evaluator(trajectory, config_file, env.page, client)
 - Catch `OpenAIError` → log and continue
 - Catch any other `Exception` → log + write traceback to `error.txt` and continue
 
-**6. Summary**
+**7. Summary**
 
 ```python
-logger.info(f"Average score: {sum(scores)/len(scores)}")
+logger.info(f"Average score: {sum(scores)/len(scores) if scores else 'N/A (no completed tasks)'}")
 ```
 
 ---
@@ -201,14 +238,14 @@ meta_data = {
 
 ## Helper Functions
 
-| Function | Lines | Purpose |
-|---|---|---|
-| `config()` | 59–158 | Parse + validate all CLI args |
-| `early_stop()` | 161–214 | 3 stopping criteria per step |
-| `test()` | 217–365 | Main evaluation loop |
-| `prepare()` | 368–390 | Create output dirs, convert prompts to JSON |
-| `get_unfinished()` | 393–403 | Filter already-completed tasks (resume support) |
-| `dump_config()` | 406–411 | Save `config.json` for reproducibility |
+| Function | Purpose |
+|---|---|
+| `config()` | Parse + validate all CLI args |
+| `early_stop()` | 3 stopping criteria per step |
+| `test()` | Main evaluation loop |
+| `prepare()` | Create output dirs, convert prompts to JSON |
+| `get_unfinished()` | Filter already-completed tasks (resume support) |
+| `dump_config()` | Save `config.json` for reproducibility |
 
 ---
 
@@ -238,8 +275,9 @@ Exception: if `"debug"` is in `result_dir`, all tasks run regardless.
 ```
 main()
   ├── prepare()
-  ├── construct_agent()           → PromptAgent or TeacherForcingAgent
-  └── test()
+  ├── construct_agent()              → PromptAgent or TeacherForcingAgent
+  ├── [optional] MemoryClient(url)   → wired into agent.memory_client
+  └── test(args, agent, tasks, memory_client)
         ├── ScriptBrowserEnv(...)
         └── for task in task_list:
               ├── auto_login.py subprocess   → fresh cookies
@@ -248,13 +286,18 @@ main()
               ├── loop:
               │     ├── early_stop()
               │     ├── agent.next_action()
-              │     │     ├── PromptConstructor.construct()
-              │     │     ├── call_llm()             → OpenAI / HuggingFace
+              │     │     ├── PromptConstructor.construct()  (MemoryCoT: injects memories)
+              │     │     ├── call_llm()             → vLLM / OpenAI / HuggingFace
               │     │     └── extract_action() + create_id_based_action()
-              │     ├── env.step(action)             → Playwright → Chromium
+              │     ├── if RETRIEVE_MEMORY:
+              │     │     ├── memory_client.retrieve(query)
+              │     │     └── store in meta_data["retrieved_memories"], re-append state
+              │     ├── else: env.step(action)       → Playwright → Chromium
               │     └── trajectory.append(...)
-              └── evaluator_router()(trajectory, page, ...)
-                    ├── StringEvaluator    (answer text)
-                    ├── URLEvaluator       (page.url)
-                    └── HTMLContentEvaluator (DOM content)
+              ├── evaluator_router()(trajectory, page, ...)
+              │     ├── StringEvaluator    (answer text)
+              │     ├── URLEvaluator       (page.url)
+              │     └── HTMLContentEvaluator (DOM content)
+              └── [optional] agent.extract_and_save_memories(trajectory, intent, score)
+                    └── memory_client.add_memories(items)
 ```

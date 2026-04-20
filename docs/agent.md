@@ -45,17 +45,23 @@ The main LLM-driven agent.
 
 ```python
 PromptAgent(
-    action_set_tag: str,            # "id_accessibility_tree" or "playwright"
-    lm_config: LMConfig,            # model + generation settings
+    action_set_tag: str,                    # "id_accessibility_tree" or "playwright"
+    lm_config: LMConfig,                    # model + generation settings
     prompt_constructor: PromptConstructor,  # formats obs → prompt, parses response → action
+    memory_client: Any = None,              # MemoryClient instance (optional)
+    extraction_lm_config: Any = None,       # LMConfig for memory extraction (optional)
 )
 ```
+
+`memory_client` and `extraction_lm_config` are wired in by `run.py` after `construct_agent()` returns (not passed to the factory), because they depend on CLI args processed after agent construction.
 
 ### `next_action()` Step-by-Step
 
 ```
 1. prompt_constructor.construct(trajectory, intent, meta_data)
       → formatted LLM input (OpenAI messages list or string)
+      (MemoryCoTPromptConstructor also pops meta_data["retrieved_memories"]
+       and prepends RETRIEVED MEMORIES: block when non-empty)
 
 2. call_llm(lm_config, prompt)
       → raw LLM response string
@@ -73,6 +79,22 @@ PromptAgent(
 6. return Action
 ```
 
+### `extract_and_save_memories(trajectory, intent, score)` (`agent.py:165`)
+
+Called by `run.py` after each task if `memory_client` and `extraction_lm_config` are set.
+
+```
+1. Builds a text summary of the trajectory (objective + obs snippets + raw actions)
+2. Selects extraction prompt: "success_extraction" if score==1, else "failure_extraction"
+   (from memorybank/models/prompts.py → webarena_prompts dict)
+3. Calls call_llm(extraction_lm_config, prompt)
+4. Parses MemoryItem objects via MemoryItem.from_string(response)
+   (from memorybank/memory/memory_storage.py)
+5. Calls memory_client.add_memories(items)
+```
+
+Failures are silently swallowed — extraction never crashes the main loop.
+
 ### `construct_agent(args)` — Factory Function
 
 ```
@@ -83,6 +105,7 @@ PromptAgent(
       tokenizer = Tokenizer(provider, model)
       constructor = eval(class_name)(instruction_path, lm_config, tokenizer)
       return PromptAgent(action_set_tag, lm_config, constructor)
+      # memory_client + extraction_lm_config wired in run.py afterward
 ```
 
 Note: the class name is evaluated with `eval()` — it must be one of the `PromptConstructor` subclasses importable in scope.
@@ -114,7 +137,9 @@ Loaded from an instruction JSON with four fields:
 
 | Provider + mode | Output format |
 |---|---|
-| OpenAI chat | `list[{"role": ..., "content": ...}]` — system intro, alternating example_user/assistant, then user |
+| `vllm` chat | `list[{"role": ..., "content": ...}]` — system intro, alternating user/assistant, then user |
+| `vllm` completion | Single formatted string |
+| OpenAI chat | Same list format as vllm chat but with `example_user`/`example_assistant` system names |
 | OpenAI completion | Single formatted string |
 | HuggingFace Llama-2 chat | String with `[INST]`/`[/INST]` and `<<SYS>>`/`<</SYS>>` tokens |
 
@@ -133,7 +158,7 @@ Agent predicts the action directly, no reasoning.
 **`_extract_action(response)`:**  
 Regex `r"```((.|\n)*?)```"` — finds text between backticks. Raises `ActionParsingError` if not found.
 
-### CoTPromptConstructor (line 206)
+### CoTPromptConstructor (line 228)
 
 Agent reasons step-by-step before the action. Identical `construct()`.
 
@@ -142,19 +167,38 @@ The key difference is in the examples: each one ends with:
 
 `_extract_action()` uses the same backtick regex, so it only captures the final action and ignores the reasoning text before it.
 
+### MemoryCoTPromptConstructor (line 285)
+
+Subclass of `CoTPromptConstructor`. Used with the memory-enabled prompt (`p_cot_id_actree_2s_memory.py`).
+
+**`construct()`** — same as `CoTPromptConstructor` plus:
+1. Pops `meta_data["retrieved_memories"]` (cleared after this step so memories don't accumulate)
+2. If non-empty, prepends `RETRIEVED MEMORIES:\n{memories}\n\n` before the observation block
+3. Template must include `{memories}` as a keyword; empty string when no memories
+
+The template format:
+```
+{memories}OBSERVATION:
+{observation}
+URL: {url}
+OBJECTIVE: {objective}
+PREVIOUS ACTION: {previous_action}
+```
+
 ---
 
 ## Prompt Template Files (`prompts/raw/`)
 
-Stored as Python dicts, converted to JSON via `to_json.py`.
+Stored as Python dicts, converted to JSON via `to_json.py`. The JSON files land in `prompts/jsons/` and are regenerated at run-start by `prepare()`.
 
-| File | Type | Action space | Shots | Notes |
-|---|---|---|---|---|
-| `p_direct_id_actree_2s.py` | Direct | accessibility tree IDs | 2 | Standard GPT |
-| `p_cot_id_actree_2s.py` | CoT | accessibility tree IDs | 2 | Standard GPT |
-| `p_direct_id_actree_2s_no_na.py` | Direct | accessibility tree IDs | 2 | No N/A for impossible tasks |
-| `p_cot_id_actree_2s_no_na.py` | CoT | accessibility tree IDs | 2 | No N/A for impossible tasks |
-| `p_direct_id_actree_3s_llama.py` | Direct | accessibility tree IDs | 3 | Llama-2, has `force_prefix: "```"` |
+| File | Constructor | Shots | Notes |
+|---|---|---|---|
+| `p_direct_id_actree_2s.py` | `DirectPromptConstructor` | 2 | Standard |
+| `p_cot_id_actree_2s.py` | `CoTPromptConstructor` | 2 | Standard; default for vLLM runs |
+| `p_direct_id_actree_2s_no_na.py` | `DirectPromptConstructor` | 2 | No N/A option for impossible tasks |
+| `p_cot_id_actree_2s_no_na.py` | `CoTPromptConstructor` | 2 | No N/A option for impossible tasks |
+| `p_direct_id_actree_3s_llama.py` | `DirectPromptConstructor` | 3 | Llama-2, has `force_prefix: "```"` |
+| `p_cot_id_actree_2s_memory.py` | `MemoryCoTPromptConstructor` | 2 | Adds `retrieve_memory` action + `{memories}` template slot |
 
 ### What a Full Prompt Looks Like (CoT, OpenAI chat)
 
@@ -186,6 +230,23 @@ PREVIOUS ACTION: [last action string]
 
 ---
 
+## New File: `agent/memory_client.py`
+
+Sync HTTP client for the retriever server (started externally before `run.py`).
+
+```python
+class MemoryClient:
+    def __init__(self, base_url: str)
+    def retrieve(query: str, top_k: int = 3) -> str
+        # POST /retrieve → returns formatted "[1] title: content\n[2] ..." string
+    def add_memories(items: list[MemoryItem]) -> None
+        # POST /add_memories
+```
+
+`retrieve()` returns an empty string if no memories are found, so the prompt section is omitted cleanly.
+
+---
+
 ## meta_data — Action History Sidecar
 
 Passed to `next_action()` on every step. Provides one-step memory without parsing the trajectory:
@@ -193,7 +254,8 @@ Passed to `next_action()` on every step. Provides one-step memory without parsin
 ```python
 meta_data = {
     "action_history": ["click [42]", "type [164] [query] [1]", ...],
-    "force_prefix": "```",   # optional, for Llama prefix forcing
+    # Set by run.py when agent issues retrieve_memory:
+    "retrieved_memories": "...",   # consumed + cleared by MemoryCoTPromptConstructor
 }
 ```
 
@@ -209,14 +271,18 @@ run.py
         │
         ├─ PromptConstructor.construct()
         │       tokenizer.encode(obs)[:max_obs_length]    truncate
+        │       [MemoryCoTPromptConstructor: pop retrieved_memories → prepend block]
         │       fill template → get_lm_api_input()
-        │       → list of OpenAI messages
+        │       → list of messages (vLLM / OpenAI format)
         │
         ├─ call_llm(lm_config, messages)
-        │       → "...```click [42]```"
+        │       → "...```click [42]```"  or  "...```retrieve_memory [query]```"
         │
-        ├─ extract_action() → "click [42]"
+        ├─ extract_action() → "click [42]" or "retrieve_memory [query]"
         │
         └─ create_id_based_action("click [42]")
                 → Action{action_type=CLICK, element_id="42", raw_prediction="..."}
+           create_id_based_action("retrieve_memory [query]")
+                → Action{action_type=RETRIEVE_MEMORY, answer="query", raw_prediction="..."}
+                   (run.py intercepts this — env.step() not called)
 ```

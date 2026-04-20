@@ -147,6 +147,8 @@ def action2str(
                 action_str = f"page_focus [{action['page_number']}]"
             case ActionTypes.STOP:
                 action_str = f"stop [{action['answer']}]"
+            case ActionTypes.RETRIEVE_MEMORY:
+                action_str = f"retrieve_memory [{action['answer']}]"
             case ActionTypes.NONE:
                 action_str = "none"
             case _:
@@ -268,6 +270,7 @@ class ActionTypes(IntEnum):
     SELECT_OPTION = 16
 
     STOP = 17
+    RETRIEVE_MEMORY = 18
 
     def __str__(self) -> str:
         return f"ACTION_TYPES.{self.name}"
@@ -318,6 +321,8 @@ def is_equivalent(a: Action, b: Action) -> bool:
         case ActionTypes.CHECK | ActionTypes.SELECT_OPTION:
             return a["pw_code"] == b["pw_code"]
         case ActionTypes.STOP:
+            return a["answer"] == b["answer"]
+        case ActionTypes.RETRIEVE_MEMORY:
             return a["answer"] == b["answer"]
         case _:
             raise ValueError(f"Unknown action type: {a['action_type']}")
@@ -449,6 +454,13 @@ def create_none_action() -> Action:
 def create_stop_action(answer: str) -> Action:
     action = create_none_action()
     action.update({"action_type": ActionTypes.STOP, "answer": answer})
+    return action
+
+
+@beartype
+def create_retrieve_memory_action(query: str) -> Action:
+    action = create_none_action()
+    action.update({"action_type": ActionTypes.RETRIEVE_MEMORY, "answer": query})
     return action
 
 
@@ -1582,5 +1594,11 @@ def create_id_based_action(action_str: str) -> Action:
             else:
                 answer = match.group(1)
             return create_stop_action(answer)
+        case "retrieve_memory":
+            match = re.search(r"retrieve_memory ?\[(.+)\]", action_str)
+            if not match:
+                raise ActionParsingError(f"Invalid retrieve_memory action {action_str}")
+            query = match.group(1)
+            return create_retrieve_memory_action(query)
 
     raise ActionParsingError(f"Invalid action {action_str}")

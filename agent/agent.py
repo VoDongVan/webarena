@@ -1,5 +1,7 @@
 import argparse
 import json
+import sys
+from pathlib import Path
 from typing import Any
 
 import tiktoken
@@ -106,11 +108,15 @@ class PromptAgent(Agent):
         action_set_tag: str,
         lm_config: lm_config.LMConfig,
         prompt_constructor: PromptConstructor,
+        memory_client: Any = None,
+        extraction_lm_config: Any = None,
     ) -> None:
         super().__init__()
         self.lm_config = lm_config
         self.prompt_constructor = prompt_constructor
         self.action_set_tag = action_set_tag
+        self.memory_client = memory_client
+        self.extraction_lm_config = extraction_lm_config
 
     def set_action_set_tag(self, tag: str) -> None:
         self.action_set_tag = tag
@@ -156,6 +162,41 @@ class PromptAgent(Agent):
     def reset(self, test_config_file: str) -> None:
         pass
 
+    def extract_and_save_memories(
+        self, trajectory: Trajectory, intent: str, score: float
+    ) -> None:
+        if self.memory_client is None or self.extraction_lm_config is None:
+            return
+
+        # lazy import to avoid hard dependency on memorybank at module load time
+        _mb_root = str(Path(__file__).parent.parent.parent)
+        if _mb_root not in sys.path:
+            sys.path.insert(0, _mb_root)
+        from memorybank.memory.memory_storage import MemoryItem
+        from memorybank.models.prompts import webarena_prompts
+
+        prompt_key = "success_extraction" if score == 1 else "failure_extraction"
+        extraction_prompt = webarena_prompts[prompt_key]
+
+        # build a text summary of the trajectory
+        traj_lines = [f"OBJECTIVE: {intent}"]
+        for i, item in enumerate(trajectory):
+            if isinstance(item, dict) and "observation" in item:
+                obs_text = item["observation"].get("text", "")
+                traj_lines.append(f"[Step {i//2}] OBS: {obs_text[:500]}")
+            elif isinstance(item, dict) and "action_type" in item:
+                traj_lines.append(f"[Step {i//2}] ACTION: {item.get('raw_prediction', '')[:200]}")
+        traj_text = "\n".join(traj_lines)
+
+        full_prompt = f"{extraction_prompt}\n\nTRAJECTORY:\n{traj_text}"
+        try:
+            response = call_llm(self.extraction_lm_config, full_prompt)
+            items = MemoryItem.from_string(response)
+            if items:
+                self.memory_client.add_memories(items)
+        except Exception:
+            pass  # extraction is best-effort; never crash the main loop
+
 
 def construct_agent(args: argparse.Namespace) -> Agent:
     llm_config = lm_config.construct_llm_config(args)
@@ -175,6 +216,7 @@ def construct_agent(args: argparse.Namespace) -> Agent:
             lm_config=llm_config,
             prompt_constructor=prompt_constructor,
         )
+        # memory_client and extraction_lm_config are wired in run.py after construction
     else:
         raise NotImplementedError(
             f"agent type {args.agent_type} not implemented"

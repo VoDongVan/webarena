@@ -158,3 +158,7 @@ config_files*/*8.json
 config_files*/*9.json
 config_files*/test.json
 .openhands/
+
+# Experiment results and logs
+memorybank/results*/
+memorybank/logs/

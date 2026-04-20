@@ -7,7 +7,7 @@
 #SBATCH --gpus=1
 #SBATCH -t 3:00:00
 #SBATCH -o /scratch3/workspace/vdvo_umass_edu-CS696_S26/webarena/memorybank/logs/wa_%j.out
-
+#SBATCH --mail-type=ALL
 set -euo pipefail
 
 PROJ=/scratch3/workspace/vdvo_umass_edu-CS696_S26/webarena

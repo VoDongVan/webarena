@@ -14,13 +14,17 @@ Paper: https://arxiv.org/abs/2307.13854
 run.py  (orchestrator)
   │
   ├── agent/              LLM-based decision making
-  │     ├── PromptAgent          calls LLM each step
+  │     ├── PromptAgent          calls LLM each step; optional memory_client
   │     ├── TeacherForcingAgent  replays fixed action sequence
+  │     ├── memory_client.py     HTTP client for retriever server (memory feature)
   │     └── prompts/             prompt templates + constructors
+  │           ├── CoTPromptConstructor
+  │           ├── DirectPromptConstructor
+  │           └── MemoryCoTPromptConstructor   (injects retrieved memories)
   │
   ├── browser_env/        Browser automation (Playwright + Gymnasium)
   │     ├── ScriptBrowserEnv     the Gym environment
-  │     ├── actions.py           18 action types + execution
+  │     ├── actions.py           19 action types + execution
   │     ├── processors.py        DOM/accessibility tree → text
   │     └── auto_login.py        cookie-based pre-authentication
   │
@@ -28,7 +32,7 @@ run.py  (orchestrator)
   │     ├── lm_config.py         model configuration dataclass
   │     ├── utils.py             call_llm() dispatcher
   │     ├── tokenizers.py        tiktoken / LlamaTokenizer wrapper
-  │     └── providers/           OpenAI + HuggingFace integrations
+  │     └── providers/           vLLM + OpenAI + HuggingFace integrations
   │
   ├── evaluation_harness/ Task success scoring
   │     ├── evaluators.py        StringEvaluator, URLEvaluator, HTMLContentEvaluator
@@ -91,13 +95,18 @@ run.py
   │   ├─ early_stop() check (max steps / parse failures / repeating actions)
   │   ├─ agent.next_action(trajectory, intent, meta_data)
   │   │     PromptConstructor → formats obs into LLM prompt
-  │   │     call_llm() → OpenAI/HuggingFace API
+  │   │     (MemoryCoTPromptConstructor also prepends RETRIEVED MEMORIES: block if set)
+  │   │     call_llm() → vLLM / OpenAI / HuggingFace
   │   │     extract_action() → regex → action string
   │   │     create_id_based_action() → structured Action dict
-  │   ├─ env.step(action) → Playwright executes in real browser → new obs
+  │   ├─ if RETRIEVE_MEMORY action:
+  │   │     memory_client.retrieve(query) → store in meta_data["retrieved_memories"]
+  │   │     (browser state unchanged; current state re-appended to trajectory)
+  │   ├─ else: env.step(action) → Playwright executes in real browser → new obs
   │   └─ trajectory.append(state + action)
   │
-  └─ evaluator_router(config) → score 0.0 or 1.0 → PASS / FAIL
+  ├─ evaluator_router(config) → score 0.0 or 1.0 → PASS / FAIL
+  └─ [optional] agent.extract_and_save_memories(trajectory, intent, score)
 ```
 
 ---
@@ -105,22 +114,38 @@ run.py
 ## How to Run
 
 ```bash
-# Set service URLs
+# Set service URLs (set by run_experiment.sh on HPC; set manually for local runs)
 export SHOPPING="http://localhost:7770"
 export GITLAB="http://localhost:8023"
 export REDDIT="http://localhost:9999"
 # ... etc.
 
-# Run evaluation on tasks 0–9
+# Baseline run (no memory) — tasks 0–9, vLLM backend
 python run.py \
   --instruction_path agent/prompts/jsons/p_cot_id_actree_2s.json \
   --test_start_idx 0 \
   --test_end_idx 10 \
-  --model gpt-4 \
-  --provider openai \
+  --provider vllm \
+  --model Qwen/Qwen3-8B \
   --mode chat \
+  --exclude_sites map \
   --result_dir results/my_run/
+
+# Memory-enabled run (requires retriever server running at port 8020)
+python run.py \
+  --instruction_path agent/prompts/jsons/p_cot_id_actree_2s_memory.json \
+  --test_start_idx 0 \
+  --test_end_idx 10 \
+  --provider vllm \
+  --model Qwen/Qwen3-8B \
+  --mode chat \
+  --exclude_sites map \
+  --retriever_server_url http://localhost:8020 \
+  --top_k 3 \
+  --result_dir results/memory_run/
 ```
+
+On the HPC cluster, use `memorybank/submit_experiment.sh` which handles vLLM startup, service readiness polling, and SLURM submission automatically.
 
 ---
 

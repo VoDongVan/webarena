@@ -1,0 +1,21 @@
+# WebArena memory retrieval experiment — BM25 retriever, Qwen3-8B
+# Agent issues explicit retrieve_memory actions; memories persist across tasks.
+# Run: bash memorybank/submit_memory_experiment.sh memorybank/configs/webarena_memory_bm25.yaml
+
+# --- LLM ---
+llm_config_name: qwen3
+extraction_llm_config_name: null      # null = use main model for extraction
+
+# --- Retriever ---
+retriever_type: bm25
+retriever_port: 8020
+top_k: 3
+memories_init_path: ""                # empty = start fresh each run
+
+# --- Task selection ---
+test_start_idx: 0
+test_end_idx: 1                       # smoke test default; set to 812 for full run
+
+# --- Output ---
+memory_save_path: "webarena_memory_bank_bm25_8b.json"
+result_dir: "memorybank/results_memory_bm25_8b"

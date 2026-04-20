@@ -10,7 +10,7 @@ The browser automation layer. Wraps a real Chromium browser (via Playwright) as 
 |---|---|
 | `envs.py` | Synchronous Gymnasium environment (`ScriptBrowserEnv`) |
 | `async_envs.py` | Async variant (image observations only) |
-| `actions.py` | 18 action types, execution engine, action parsing |
+| `actions.py` | 19 action types, execution engine, action parsing |
 | `processors.py` | DOM / accessibility tree → text observation |
 | `auto_login.py` | Cookie-based pre-authentication |
 | `constants.py` | ARIA roles, character encodings, limits |
@@ -73,7 +73,7 @@ ScriptBrowserEnv(
 
 ## Action Space (`actions.py`)
 
-### ActionTypes (IntEnum) — 18 types
+### ActionTypes (IntEnum) — 19 types
 
 | Category | Action | ID | Notes |
 |---|---|---|---|
@@ -94,6 +94,7 @@ ScriptBrowserEnv(
 | | `GOTO_URL` | 13 | `url` field |
 | | `PAGE_CLOSE` | 14 | |
 | Terminal | `STOP` | 17 | `answer` field = final answer |
+| Memory | `RETRIEVE_MEMORY` | 18 | `answer` field = query string; browser state unchanged |
 | No-op | `NONE` | 0 | parse failure fallback |
 
 ### Action TypedDict
@@ -123,13 +124,16 @@ Action = TypedDict {
 ### Action String → Action Dict (used by agent)
 
 ```
-"click [42]"                    → {action_type: CLICK, element_id: "42"}
-"type [164] [query text] [1]"   → {action_type: TYPE, element_id: "164", text: [...], enter=True}
-"scroll [down]"                 → {action_type: SCROLL, direction: "down"}
-"stop [$279.49]"                → {action_type: STOP, answer: "$279.49"}
-"goto [http://...]"             → {action_type: GOTO_URL, url: "..."}
-"tab_focus [0]"                 → {action_type: PAGE_FOCUS, page_number: 0}
+"click [42]"                              → {action_type: CLICK, element_id: "42"}
+"type [164] [query text] [1]"             → {action_type: TYPE, element_id: "164", text: [...], enter=True}
+"scroll [down]"                           → {action_type: SCROLL, direction: "down"}
+"stop [$279.49]"                          → {action_type: STOP, answer: "$279.49"}
+"goto [http://...]"                       → {action_type: GOTO_URL, url: "..."}
+"tab_focus [0]"                           → {action_type: PAGE_FOCUS, page_number: 0}
+"retrieve_memory [how do I add to cart]"  → {action_type: RETRIEVE_MEMORY, answer: "how do I add to cart"}
 ```
+
+`RETRIEVE_MEMORY` is handled specially by `run.py`: `env.step()` is **not called**; the current `state_info` is re-appended to the trajectory unchanged. Retrieved memories are stored in `meta_data["retrieved_memories"]` and injected into the next LLM prompt by `MemoryCoTPromptConstructor`.
 
 ---
 
