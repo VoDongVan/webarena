@@ -19,6 +19,7 @@ VLLM_MODEL="${MODEL_NAME}"
 RESULT_DIR="${RESULT_DIR:-memorybank/results_$(basename "$CONFIG" .yaml)}"
 TEST_START_IDX="${TEST_START_IDX:-0}"
 TEST_END_IDX="${TEST_END_IDX:-812}"
+SVC_JOB_ID="${SVC_JOB_ID:-}"
 
 echo "=== Starting job on $(hostname) at $(date) ==="
 echo "Config: $CONFIG"
@@ -30,6 +31,7 @@ echo "Model: $VLLM_MODEL"
 cleanup() {
     echo "Cleaning up..."
     [[ -n "${VLLM_PID:-}" ]] && kill $VLLM_PID 2>/dev/null || true
+    [[ -n "${SVC_JOB_ID:-}" ]] && scancel "$SVC_JOB_ID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -48,12 +50,9 @@ export VLLM_API_KEY="abc"
 export MKL_SERVICE_FORCE_INTEL=1
 
 ########################################
-# WebArena startup
+# Wait for WebArena services (started by separate CPU job)
 ########################################
-start_webarena() {
-    rm -f "$NODEDIR"/.{shopping,shopping_admin,reddit,gitlab,wikipedia,homepage}_node
-    bash "$BUILDDIR/launch_all.sh"
-
+wait_for_services() {
     declare -A SVC_PORTS=(
         [shopping]=7770
         [shopping_admin]=7780
@@ -73,8 +72,8 @@ start_webarena() {
             [[ ! -f "$node_file" ]] && ALL_OK=false && continue
 
             host=$(cat "$node_file")
-            code=$(curl -s -o /dev/null -w "%{http_code}" \
-                "http://${host}:${port}" || true)
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+                "http://${host}:${port}" 2>/dev/null || true)
             code=${code:-000}
 
             [[ "$code" =~ ^[23] ]] || ALL_OK=false
@@ -120,13 +119,13 @@ start_vllm() {
 ########################################
 # Parallel startup
 ########################################
-start_webarena &
+wait_for_services &
 WA_PID=$!
 
 start_vllm &
 VLLM_INIT_PID=$!
 
-wait $WA_PID || { echo "WebArena failed"; exit 1; }
+wait $WA_PID || { echo "WebArena services not ready"; exit 1; }
 wait $VLLM_INIT_PID || { echo "vLLM failed"; exit 1; }
 
 ########################################

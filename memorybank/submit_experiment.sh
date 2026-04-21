@@ -22,6 +22,8 @@ fi
 ########################################
 PROJ=/scratch3/workspace/vdvo_umass_edu-CS696_S26/webarena/memorybank
 LLM_CLIENTS="$PROJ/configs/llm_clients.yaml"
+WA_PROJ="$(dirname $PROJ)"
+NODEDIR="$WA_PROJ/../webarena_build/homepage"
 
 ########################################
 # Extract fields from YAML
@@ -62,7 +64,7 @@ echo "Task range:          $TEST_START_IDX .. $TEST_END_IDX"
 ########################################
 if [[ "$MODEL_NAME" =~ 27B ]]; then
     GPU_CONSTRAINT="vram80"
-    TIME="24:00:00"
+    TIME="8:00:00"
     PARTITION="superpod-a100"
 elif [[ "$MODEL_NAME" =~ 0\.8B ]]; then
     GPU_CONSTRAINT="vram16|vram23|vram40"
@@ -88,12 +90,72 @@ echo "Selected time: $TIME"
 echo "Selected partition: $PARTITION"
 
 ########################################
-# Submit job
+# Submit CPU services job
 ########################################
-sbatch \
+SVC_JOB_ID=$(sbatch --parsable \
+    --job-name="wa_svc_$(basename $CONFIG_PATH .yaml)" \
+    --partition="cpu" \
+    --time="$TIME" \
+    --export=ALL \
+    "$PROJ/run_webarena_services.sh")
+
+echo "Submitted services job: $SVC_JOB_ID"
+
+########################################
+# Poll until all services are healthy
+########################################
+declare -A SVC_PORTS=(
+    [shopping]=7770
+    [shopping_admin]=7780
+    [reddit]=9999
+    [gitlab]=8023
+    [wikipedia]=8888
+    [homepage]=4399
+)
+
+echo "Waiting for WebArena services to be ready..."
+for attempt in $(seq 1 180); do
+    ALL_OK=true
+
+    for svc in "${!SVC_PORTS[@]}"; do
+        node_file="$NODEDIR/.${svc}_node"
+        port="${SVC_PORTS[$svc]}"
+
+        if [[ ! -f "$node_file" ]]; then
+            ALL_OK=false
+            continue
+        fi
+
+        host=$(cat "$node_file")
+        code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+            "http://${host}:${port}" 2>/dev/null || true)
+        code=${code:-000}
+        [[ "$code" =~ ^[23] ]] || ALL_OK=false
+    done
+
+    if [[ "$ALL_OK" == "true" ]]; then
+        echo "All services ready (attempt $attempt, $((attempt * 15))s elapsed)"
+        break
+    fi
+
+    if [[ $attempt -eq 180 ]]; then
+        echo "ERROR: Services not ready after 45 minutes. Cancelling services job."
+        scancel "$SVC_JOB_ID"
+        exit 1
+    fi
+
+    sleep 15
+done
+
+########################################
+# Submit GPU experiment job
+########################################
+GPU_JOB_ID=$(sbatch --parsable \
     --job-name="wa_$(basename $CONFIG_PATH .yaml)" \
     --partition="$PARTITION" \
     --constraint="$GPU_CONSTRAINT" \
     --time="$TIME" \
-    --export=ALL,WEBARENA_CONFIG="$CONFIG_PATH",MODEL_NAME="$MODEL_NAME",RESULT_DIR="$RESULT_DIR",TEST_START_IDX="$TEST_START_IDX",TEST_END_IDX="$TEST_END_IDX" \
-    run_experiment.sh
+    --export=ALL,WEBARENA_CONFIG="$CONFIG_PATH",MODEL_NAME="$MODEL_NAME",RESULT_DIR="$RESULT_DIR",TEST_START_IDX="$TEST_START_IDX",TEST_END_IDX="$TEST_END_IDX",SVC_JOB_ID="$SVC_JOB_ID" \
+    "$PROJ/run_experiment.sh")
+
+echo "Submitted GPU job: $GPU_JOB_ID"
