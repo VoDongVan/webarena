@@ -1,6 +1,8 @@
 import argparse
+import importlib.util
 import json
 import logging
+import re as _re
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,6 +32,57 @@ from llms import (
 from llms.tokenizers import Tokenizer
 
 # Tool schema for memory retrieval — description will be refined in prompt work.
+class _MemoryItem:
+    """Local MemoryItem that avoids qdrant_client/fastembed deps in the outer memorybank."""
+
+    def __init__(self, title: str = "", context: str = "", content: str = "", polarity: Any = None) -> None:
+        self.title = title
+        self.context = context
+        self.content = content
+        self.polarity = polarity
+
+    @staticmethod
+    def from_string(memory_str: str) -> list["_MemoryItem"]:
+        tag_match = _re.search(r"<extracted_memories>(.*?)</extracted_memories>", memory_str, _re.DOTALL)
+        parse_str = tag_match.group(1) if tag_match else memory_str
+        parse_str = parse_str.replace("Memory Item", "# Memory Item")
+        items: list[_MemoryItem] = []
+        for chunk in parse_str.split("# Memory Item"):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            try:
+                lines = [line.strip() for line in chunk.splitlines() if line.strip()]
+                if not lines:
+                    continue
+                int(lines[0].split()[0])  # first line must be a numeric index
+                title = context = content = ""
+                current_field: str | None = None
+                for line in lines[1:]:
+                    ll = line.lower()
+                    if ll.startswith("## title"):
+                        current_field = "title"
+                        title = line[len("## title"):].strip()
+                    elif ll.startswith("## context"):
+                        current_field = "context"
+                        context = line[len("## context"):].strip()
+                    elif ll.startswith("## content"):
+                        current_field = "content"
+                        content = line[len("## content"):].strip()
+                    elif ll.startswith("## "):
+                        current_field = None
+                    elif current_field == "title":
+                        title = (title + " " + line).strip()
+                    elif current_field == "context":
+                        context = (context + " " + line).strip()
+                    elif current_field == "content":
+                        content = (content + " " + line).strip()
+                items.append(_MemoryItem(title=title, context=context, content=content))
+            except Exception:
+                continue
+        return items
+
+
 _RETRIEVE_MEMORY_TOOL: dict[str, Any] = {
     "type": "function",
     "function": {
@@ -263,13 +316,19 @@ class PromptAgent(Agent):
         if self.memory_client is None or self.extraction_lm_config is None:
             return
 
-        # lazy import to avoid hard dependency on memorybank at module load time
-        # memorybank/ uses bare imports (memory.x, models.x), so add memorybank/ itself.
+        # Load models/prompts.py directly to bypass models/__init__.py, which pulls
+        # in fastembed/qdrant not installed in the webarena conda environment.
         _mb_root = str(Path(__file__).parent.parent.parent / "memorybank")
-        if _mb_root not in sys.path:
-            sys.path.insert(0, _mb_root)
-        from memory.memory_storage import MemoryItem
-        from models.prompts import webarena_prompts
+        try:
+            _spec = importlib.util.spec_from_file_location(
+                "_mb_models_prompts", f"{_mb_root}/models/prompts.py"
+            )
+            _pmod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_pmod)
+            webarena_prompts = _pmod.webarena_prompts
+        except Exception as e:
+            logger.warning(f"[MemoryExtraction] Cannot load webarena_prompts: {e}")
+            return
 
         prompt_key = "success_extraction" if score == 1 else "failure_extraction"
         extraction_prompt = webarena_prompts[prompt_key]
@@ -287,11 +346,14 @@ class PromptAgent(Agent):
         messages = [{"role": "user", "content": f"{extraction_prompt}\n\nTRAJECTORY:\n{traj_text}"}]
         try:
             response = call_llm(self.extraction_lm_config, messages)
-            items = MemoryItem.from_string(response)
+            items = _MemoryItem.from_string(response)
             if items:
                 self.memory_client.add_memories(items)
-        except Exception:
-            pass  # extraction is best-effort; never crash the main loop
+                logger.info(f"[MemoryExtraction] Saved {len(items)} memories (score={score})")
+            else:
+                logger.info(f"[MemoryExtraction] No memories extracted (score={score})")
+        except Exception as e:
+            logger.warning(f"[MemoryExtraction] Failed: {e}")  # extraction is best-effort
 
 
 def construct_agent(args: argparse.Namespace) -> Agent:
