@@ -14,8 +14,8 @@ APIInput = str | list[Any] | dict[str, Any]
 def call_llm(
     lm_config: lm_config.LMConfig,
     prompt: APIInput,
-) -> str:
-    response: str
+    tools: list[dict[str, Any]] | None = None,
+) -> Any:
     if lm_config.provider == "openai":
         if lm_config.mode == "chat":
             assert isinstance(prompt, list)
@@ -27,6 +27,7 @@ def call_llm(
                 context_length=lm_config.gen_config["context_length"],
                 max_tokens=lm_config.gen_config["max_tokens"],
                 stop_token=None,
+                tools=tools,
             )
         elif lm_config.mode == "completion":
             assert isinstance(prompt, str)
@@ -62,6 +63,7 @@ def call_llm(
             context_length=lm_config.gen_config["context_length"],
             max_tokens=lm_config.gen_config["max_tokens"],
             stop_token=None,
+            tools=tools,
         )
     else:
         raise NotImplementedError(

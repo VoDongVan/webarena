@@ -242,15 +242,16 @@ async def agenerate_from_openai_chat_completion(
 
 @retry_with_exponential_backoff
 def generate_from_openai_chat_completion(
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     model: str,
     temperature: float,
     max_tokens: int,
     top_p: float,
     context_length: int,
     stop_token: str | None = None,
-) -> str:
-    response = _client_sync().chat.completions.create(
+    tools: list[dict[str, Any]] | None = None,
+) -> Any:
+    kwargs: dict[str, Any] = dict(
         model=model,
         messages=messages,
         temperature=temperature,
@@ -258,8 +259,14 @@ def generate_from_openai_chat_completion(
         top_p=top_p,
         stop=[stop_token] if stop_token else None,
     )
-    answer: str = response.choices[0].message.content
-    return answer
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+    response = _client_sync().chat.completions.create(**kwargs)
+    msg = response.choices[0].message
+    if tools:
+        return msg  # caller inspects .tool_calls vs .content
+    return msg.content or ""
 
 
 @retry_with_exponential_backoff

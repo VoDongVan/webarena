@@ -113,6 +113,8 @@ start_vllm() {
         --max-model-len 128000 \
         --dtype auto \
         --reasoning-parser qwen3 \
+        --enable-auto-tool-choice \
+        --tool-call-parser hermes \
         --trust-remote-code \
         > "$PROJ/memorybank/logs/vllm_${SLURM_JOB_ID}.log" 2>&1 &
 

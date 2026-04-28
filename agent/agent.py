@@ -26,6 +26,25 @@ from llms import (
 )
 from llms.tokenizers import Tokenizer
 
+# Tool schema for memory retrieval — description will be refined in prompt work.
+_RETRIEVE_MEMORY_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "retrieve_memory",
+        "description": "Search past experience for relevant memories.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Short phrase describing what to look up.",
+                }
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 
 class Agent:
     """Base class for the agent"""
@@ -110,6 +129,7 @@ class PromptAgent(Agent):
         prompt_constructor: PromptConstructor,
         memory_client: Any = None,
         extraction_lm_config: Any = None,
+        top_k: int = 3,
     ) -> None:
         super().__init__()
         self.lm_config = lm_config
@@ -117,6 +137,7 @@ class PromptAgent(Agent):
         self.action_set_tag = action_set_tag
         self.memory_client = memory_client
         self.extraction_lm_config = extraction_lm_config
+        self.top_k = top_k
 
     def set_action_set_tag(self, tag: str) -> None:
         self.action_set_tag = tag
@@ -125,37 +146,86 @@ class PromptAgent(Agent):
     def next_action(
         self, trajectory: Trajectory, intent: str, meta_data: dict[str, Any]
     ) -> Action:
-        prompt = self.prompt_constructor.construct(
-            trajectory, intent, meta_data
-        )
+        prompt = self.prompt_constructor.construct(trajectory, intent, meta_data)
         lm_config = self.lm_config
-        n = 0
-        while True:
-            response = call_llm(lm_config, prompt)
-            force_prefix = self.prompt_constructor.instruction[
-                "meta_data"
-            ].get("force_prefix", "")
-            response = f"{force_prefix}{response}"
-            n += 1
-            try:
-                parsed_response = self.prompt_constructor.extract_action(
-                    response
-                )
-                if self.action_set_tag == "id_accessibility_tree":
-                    action = create_id_based_action(parsed_response)
-                elif self.action_set_tag == "playwright":
-                    action = create_playwright_action(parsed_response)
-                else:
-                    raise ValueError(
-                        f"Unknown action type {self.action_set_tag}"
-                    )
-                action["raw_prediction"] = response
-                break
-            except ActionParsingError as e:
-                if n >= lm_config.gen_config["max_retry"]:
-                    action = create_none_action()
+        force_prefix = self.prompt_constructor.instruction["meta_data"].get("force_prefix", "")
+
+        if self.memory_client is not None:
+            # Tool-calling path: retrieval happens in-step via the API tool loop.
+            tools = [_RETRIEVE_MEMORY_TOOL]
+            messages: list[dict[str, Any]] = list(prompt)  # mutable copy
+            n = 0
+            while True:
+                msg = call_llm(lm_config, messages, tools=tools)
+
+                if msg.tool_calls:
+                    # Append the assistant turn, then execute and append each result.
+                    messages.append({
+                        "role": "assistant",
+                        "content": msg.content,
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            }
+                            for tc in msg.tool_calls
+                        ],
+                    })
+                    for tc in msg.tool_calls:
+                        query = json.loads(tc.function.arguments).get("query", "")
+                        result = self.memory_client.retrieve(query, self.top_k)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result,
+                        })
+                    continue
+
+                # No tool calls — parse the browser action.
+                response = f"{force_prefix}{msg.content or ''}"
+                n += 1
+                try:
+                    parsed_response = self.prompt_constructor.extract_action(response)
+                    if self.action_set_tag == "id_accessibility_tree":
+                        action = create_id_based_action(parsed_response)
+                    elif self.action_set_tag == "playwright":
+                        action = create_playwright_action(parsed_response)
+                    else:
+                        raise ValueError(f"Unknown action type {self.action_set_tag}")
                     action["raw_prediction"] = response
                     break
+                except ActionParsingError:
+                    if n >= lm_config.gen_config["max_retry"]:
+                        action = create_none_action()
+                        action["raw_prediction"] = response
+                        break
+                    # Retry: call again with the same messages (no bad turn appended).
+        else:
+            # Baseline path: no tools, plain text response.
+            n = 0
+            while True:
+                response = call_llm(lm_config, prompt)
+                response = f"{force_prefix}{response}"
+                n += 1
+                try:
+                    parsed_response = self.prompt_constructor.extract_action(response)
+                    if self.action_set_tag == "id_accessibility_tree":
+                        action = create_id_based_action(parsed_response)
+                    elif self.action_set_tag == "playwright":
+                        action = create_playwright_action(parsed_response)
+                    else:
+                        raise ValueError(f"Unknown action type {self.action_set_tag}")
+                    action["raw_prediction"] = response
+                    break
+                except ActionParsingError:
+                    if n >= lm_config.gen_config["max_retry"]:
+                        action = create_none_action()
+                        action["raw_prediction"] = response
+                        break
 
         return action
 

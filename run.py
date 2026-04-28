@@ -349,14 +349,6 @@ def test(
                 if action["action_type"] == ActionTypes.STOP:
                     break
 
-                if action["action_type"] == ActionTypes.RETRIEVE_MEMORY:
-                    if memory_client:
-                        memories = memory_client.retrieve(action["answer"], args.top_k)
-                        meta_data["retrieved_memories"] = memories
-                    # browser state unchanged — re-use current state_info
-                    trajectory.append(state_info)
-                    continue
-
                 obs, _, terminated, _, info = env.step(action)
                 state_info = {"observation": obs, "info": info}
                 trajectory.append(state_info)
@@ -501,6 +493,7 @@ if __name__ == "__main__":
             memory_client = MemoryClient(args.retriever_server_url)
             if isinstance(agent, PromptAgent):
                 agent.memory_client = memory_client
+                agent.top_k = args.top_k
                 if args.extraction_model:
                     from llms import lm_config as _lm_config
                     extraction_args = argparse.Namespace(**vars(args))
