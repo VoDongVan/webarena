@@ -214,6 +214,7 @@ class PromptAgent(Agent):
         self.memory_client = memory_client
         self.extraction_lm_config = extraction_lm_config
         self.top_k = top_k
+        self._memory_trace: list[dict] = []
 
     def set_action_set_tag(self, tag: str) -> None:
         self.action_set_tag = tag
@@ -256,6 +257,7 @@ class PromptAgent(Agent):
                         logger.info(f"[MEMORY_CALL] query={query[:300]!r}")
                         result = self.memory_client.retrieve(query, self.top_k)
                         logger.info(f"[MEMORY_RESULT] returned {len(result)} chars")
+                        self._memory_trace.append({"query": query, "retrieved": result})
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
@@ -307,8 +309,13 @@ class PromptAgent(Agent):
 
         return action
 
+    @property
+    def memory_trace(self) -> list[dict]:
+        """Per-task list of {"query": str, "retrieved": str} for each retrieve_memory call."""
+        return list(self._memory_trace)
+
     def reset(self, test_config_file: str) -> None:
-        pass
+        self._memory_trace = []
 
     def extract_and_save_memories(
         self, trajectory: Trajectory, intent: str, score: float

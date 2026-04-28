@@ -373,6 +373,22 @@ def test(
                 if args.memory_save_path:
                     memory_client.save_memories(args.memory_save_path)
 
+            if memory_client and isinstance(agent, PromptAgent) and agent.memory_trace:
+                trace_dir = Path(args.result_dir) / "memory_traces"
+                trace_dir.mkdir(exist_ok=True)
+                with open(trace_dir / f"{task_id}.json", "w") as f:
+                    json.dump(
+                        {
+                            "task_id": task_id,
+                            "intent": intent,
+                            "outcome": "PASS" if score == 1.0 else "FAIL",
+                            "calls": agent.memory_trace,
+                        },
+                        f,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+
             if score == 1:
                 logger.info(f"[Result] (PASS) {config_file}")
             else:
