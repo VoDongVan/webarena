@@ -17,5 +17,5 @@ test_start_idx: 0
 test_end_idx: 1                       # smoke test default; set to 812 for full run
 
 # --- Output ---
-memory_save_path: "webarena_memory_bank_bm25_8b.json"
+memory_save_path: "memorybank/memories/bm25_qwen3_8b/memories.json"
 result_dir: "memorybank/results_memory_bm25_8b"

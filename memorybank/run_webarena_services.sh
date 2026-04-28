@@ -13,15 +13,13 @@ PROJ=/scratch3/workspace/vdvo_umass_edu-CS696_S26/webarena
 BUILDDIR=$PROJ/../webarena_build
 NODEDIR=$BUILDDIR/homepage
 
-# Passed via --export from submit_experiment.sh
+# Passed via --export from submit_experiment.sh / submit_memory_experiment.sh
 CONFIG="${WEBARENA_CONFIG}"
-MODEL_NAME="${MODEL_NAME}"
-RESULT_DIR="${RESULT_DIR}"
-TEST_START_IDX="${TEST_START_IDX}"
-TEST_END_IDX="${TEST_END_IDX}"
 GPU_CONSTRAINT="${GPU_CONSTRAINT}"
 GPU_PARTITION="${GPU_PARTITION}"
 GPU_TIME="${GPU_TIME}"
+# Which GPU script to run (defaults to baseline; memory experiment overrides this)
+GPU_SCRIPT="${GPU_SCRIPT:-$PROJ/memorybank/run_experiment.sh}"
 
 echo "=== Starting WebArena services on $(hostname) at $(date) ==="
 
@@ -84,8 +82,8 @@ GPU_JOB_ID=$(sbatch --parsable \
     --partition="$GPU_PARTITION" \
     --constraint="$GPU_CONSTRAINT" \
     --time="$GPU_TIME" \
-    --export=ALL,WEBARENA_CONFIG="$CONFIG",MODEL_NAME="$MODEL_NAME",RESULT_DIR="$RESULT_DIR",TEST_START_IDX="$TEST_START_IDX",TEST_END_IDX="$TEST_END_IDX",SVC_JOB_ID="$SLURM_JOB_ID" \
-    "$PROJ/memorybank/run_experiment.sh")
+    --export=ALL,SVC_JOB_ID="$SLURM_JOB_ID" \
+    "$GPU_SCRIPT")
 
 echo "Submitted GPU job: $GPU_JOB_ID"
 echo "=== Keeping services alive until GPU job completes ==="

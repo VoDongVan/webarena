@@ -14,8 +14,12 @@ memories_init_path: ""                # empty = start fresh each run
 
 # --- Task selection ---
 test_start_idx: 0
-test_end_idx: 1                       # smoke test default; set to 812 for full run
+test_end_idx: 50
 
 # --- Output ---
-memory_save_path: "webarena_memory_bank_bm25_27b.json"
+memory_save_path: "memorybank/memories/bm25_qwen3_27b/memories.json"
 result_dir: "memorybank/results_memory_bm25_27b"
+
+# --- SLURM ---
+# ~15 min startup + 50 tasks x ~4 min avg (27B) ≈ 3h30m; 4h gives comfortable margin.
+wall_time: "4:00:00"

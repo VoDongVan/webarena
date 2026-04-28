@@ -26,7 +26,7 @@ LLM_CLIENTS="$PROJ/configs/llm_clients.yaml"
 ########################################
 # Extract fields from YAML
 ########################################
-read -r MODEL_NAME RESULT_DIR TEST_START_IDX TEST_END_IDX < <(python3 - <<EOF
+read -r MODEL_NAME RESULT_DIR TEST_START_IDX TEST_END_IDX WALL_TIME < <(python3 - <<EOF
 import yaml
 from pathlib import Path
 
@@ -48,8 +48,9 @@ result_dir = cfg.get("result_dir") or f"memorybank/results_{Path(config_path).st
 
 test_start = cfg.get("test_start_idx", 0)
 test_end   = cfg.get("test_end_idx",   812)
+wall_time  = cfg.get("wall_time", "") or ""
 
-print(model, result_dir, test_start, test_end)
+print(model, result_dir, test_start, test_end, wall_time)
 EOF
 )
 
@@ -62,7 +63,11 @@ echo "Task range:          $TEST_START_IDX .. $TEST_END_IDX"
 ########################################
 if [[ "$MODEL_NAME" =~ 27B ]]; then
     GPU_CONSTRAINT="vram80"
-    TIME="8:00:00"
+    TIME="4:00:00"
+    PARTITION="superpod-a100"
+elif [[ "$MODEL_NAME" =~ 9B ]]; then
+    GPU_CONSTRAINT="vram40|vram48"
+    TIME="2:00:00"
     PARTITION="superpod-a100"
 elif [[ "$MODEL_NAME" =~ 0\.8B ]]; then
     GPU_CONSTRAINT="vram16|vram23|vram40"
@@ -82,6 +87,9 @@ else
     TIME="4:00:00"
     PARTITION="superpod-a100"
 fi
+
+# Override default time with YAML wall_time if specified
+[[ -n "$WALL_TIME" ]] && TIME="$WALL_TIME"
 
 echo "Selected GPU constraint: $GPU_CONSTRAINT"
 echo "Selected time: $TIME"

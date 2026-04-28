@@ -169,11 +169,12 @@ class PromptAgent(Agent):
             return
 
         # lazy import to avoid hard dependency on memorybank at module load time
-        _mb_root = str(Path(__file__).parent.parent.parent)
+        # memorybank/ uses bare imports (memory.x, models.x), so add memorybank/ itself.
+        _mb_root = str(Path(__file__).parent.parent.parent / "memorybank")
         if _mb_root not in sys.path:
             sys.path.insert(0, _mb_root)
-        from memorybank.memory.memory_storage import MemoryItem
-        from memorybank.models.prompts import webarena_prompts
+        from memory.memory_storage import MemoryItem
+        from models.prompts import webarena_prompts
 
         prompt_key = "success_extraction" if score == 1 else "failure_extraction"
         extraction_prompt = webarena_prompts[prompt_key]
@@ -188,9 +189,9 @@ class PromptAgent(Agent):
                 traj_lines.append(f"[Step {i//2}] ACTION: {item.get('raw_prediction', '')[:200]}")
         traj_text = "\n".join(traj_lines)
 
-        full_prompt = f"{extraction_prompt}\n\nTRAJECTORY:\n{traj_text}"
+        messages = [{"role": "user", "content": f"{extraction_prompt}\n\nTRAJECTORY:\n{traj_text}"}]
         try:
-            response = call_llm(self.extraction_lm_config, full_prompt)
+            response = call_llm(self.extraction_lm_config, messages)
             items = MemoryItem.from_string(response)
             if items:
                 self.memory_client.add_memories(items)

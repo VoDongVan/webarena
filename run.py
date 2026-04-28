@@ -306,6 +306,8 @@ def test(
             logger.info(f"[Config file]: {config_file}")
             logger.info(f"[Intent]: {intent}")
 
+            if memory_client:
+                memory_client.reset_session()
             agent.reset(config_file)
             trajectory: Trajectory = []
             obs, info = env.reset(options={"config_file": config_file})
@@ -508,3 +510,11 @@ if __name__ == "__main__":
                     agent.extraction_lm_config = agent.lm_config
 
         test(args, agent, test_file_list, memory_client=memory_client)
+
+        if memory_client and memory_client.provenance:
+            memory_client.save_provenance(
+                Path(args.result_dir) / "memory_provenance.json"
+            )
+
+        if memory_client and args.memory_save_path:
+            memory_client.save_memories(args.memory_save_path)
