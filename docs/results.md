@@ -191,23 +191,69 @@ Key fields: `model`, `provider`, `temperature`, `top_p`, `max_tokens`,
 
 ## Analysing results programmatically
 
-Use the provided analysis script:
+### `analyze_results.py` — pass-rate summary
 
 ```bash
-# Print summary to stdout
+# Print summary to stdout (default: results_baseline_27b)
 python memorybank/analyze_results.py
 
 # Analyse a different results directory
-python memorybank/analyze_results.py memorybank/results/
+python memorybank/analyze_results.py memorybank/results_memory_bm25_27b_test/
 
 # Export per-task data
 python memorybank/analyze_results.py --json results.json --csv results.csv
 ```
 
-The script produces:
+Produces:
 - Overall pass rate
 - Per-site pass rate
 - Per eval-type pass rate and error rate
 - Agent behaviour breakdown (stop reasons, step counts)
 - List of passed task IDs
 - List of tasks where the evaluator crashed (UNKNOWN outcome)
+
+**Known limitation**: `parse_logs()` reads all `wa_*.out` files in `memorybank/logs/`
+globally. When results from multiple runs cover the same task IDs, the latest log file
+(highest job ID) wins. Analysing a 9B run's result directory while a later 27B run
+exists will incorrectly show the 27B outcomes for shared task IDs.
+
+---
+
+### `inspect_memory_calls.py` — per-task memory query inspector (memory runs only)
+
+Shows the `retrieve_memory` queries the agent issued each task, how many characters
+each returned, and the full content of every memory the agent received (reconstructed
+from `memory_provenance.json`).
+
+```bash
+# Default: 27B smoke-test run (all tasks)
+python memorybank/inspect_memory_calls.py
+
+# Only tasks 1 and 5
+python memorybank/inspect_memory_calls.py --tasks 1 5
+
+# Hide the empty-query count annotation
+python memorybank/inspect_memory_calls.py --no-empty
+
+# Print full memory bank at the end
+python memorybank/inspect_memory_calls.py --bank
+
+# 9B run
+python memorybank/inspect_memory_calls.py \
+    --log        memorybank/logs/wa_56406178.out \
+    --memories   memorybank/memories/bm25_qwen3_9b/memories.json \
+    --provenance memorybank/results_memory_bm25_9b_test/memory_provenance.json
+```
+
+Per-task output:
+- Intent, outcome (PASS/FAIL), call counts (total / non-empty / empty / hits / extracted)
+- Each non-empty query with its returned character count
+- Full title + context + content of every memory the model received (derived from
+  `memory_provenance.json`: parent IDs of new memories produced that task)
+
+Summary table columns: `Task | Out | Total | NonEmp | Empty | Hits | Extr | Intent`
+
+Required files (all produced automatically by `run_memory_experiment.sh`):
+- `memorybank/logs/wa_<JOB_ID>.out` — SLURM log with `[MEMORY_CALL]` / `[MEMORY_RESULT]` lines
+- `memorybank/memories/<run>/memories.json` — accumulated memory bank
+- `memorybank/results_<run>/memory_provenance.json` — provenance graph written at run end
