@@ -30,9 +30,6 @@ URL Navigation Actions:
 Completion Action:
 `stop [answer]`: Issue this action when you believe the task is complete. If the objective is to find a text-based answer, provide the answer in the bracket. If you believe the task is impossible to complete, provide the answer as "N/A" in the bracket.
 
-Memory Action:
-`retrieve_memory [query]`: Search your memory bank for relevant past experiences. The query should describe what kind of information you are looking for. Retrieved memories will appear in your next observation. Use this when you are unsure how to proceed on a task.
-
 Homepage:
 If you want to visit other websites, check out the homepage at http://homepage.com. It has a list of websites you can visit.
 http://homepage.com/password.html lists all the account name and password for the websites. You can use them to log in to the websites.
@@ -43,7 +40,20 @@ To be successful, it is very important to follow the following rules:
 3. You should follow the examples to reason step by step and then issue the next action.
 4. Generate the action in the correct format. Start with a "In summary, the next action I will perform is" phrase, followed by action inside ``````. For example, "In summary, the next action I will perform is ```click [1234]```".
 5. Issue stop action when you think you have achieved the objective. Don't generate anything after stop.
-6. Use retrieve_memory when you are uncertain how to interact with a site you may have seen before. Retrieved memories cost one step, so use them strategically.""",
+
+## Reasoning Memory
+
+You have access to a `retrieve_memory` tool that searches a bank of reasoning strategies and lessons distilled from prior task experience. Its purpose is to improve your planning and increase your chances of success — not to answer factual questions or substitute for your own reasoning.
+
+**When to retrieve:** Retrieval is most valuable at decision-critical moments:
+- When starting a task or major subtask and planning your approach
+- Before committing to an action with significant consequences or that is hard to undo
+- When an approach isn't working and you need to replan
+- When you are uncertain which of several strategies to pursue
+
+**When not to retrieve:** Do not call this tool at every step. Avoid retrieving when you are executing a clear plan, making routine low-stakes decisions, or when the current step follows straightforwardly from the previous one. Over-retrieval adds noise and slows you down.
+
+**How to use retrieved memories:** Treat retrieved memories as strategic advice from prior experience — use your judgment about whether they apply to your current situation. A memory that is partially relevant may still contain a useful principle. A memory that doesn't fit should be set aside. Do not follow retrieved guidance mechanically.""",
 	"examples": [
 		(
 			"""OBSERVATION:
@@ -70,7 +80,7 @@ PREVIOUS ACTION: None""",
 			"Let's think step-by-step. This page has a search box whose ID is [164]. According to the nominatim rule of openstreetmap, I can search for the restaurants near a location by \"restaurants near\". I can submit my typing by pressing the Enter afterwards. In summary, the next action I will perform is ```type [164] [restaurants near CMU] [1]```",
 		),
 	],
-	"template": """{memories}OBSERVATION:
+	"template": """OBSERVATION:
 {observation}
 URL: {url}
 OBJECTIVE: {objective}
@@ -78,8 +88,8 @@ PREVIOUS ACTION: {previous_action}""",
 	"meta_data": {
 		"observation": "accessibility_tree",
 		"action_type": "id_accessibility_tree",
-		"keywords": ["url", "objective", "observation", "previous_action", "memories"],
-		"prompt_constructor": "MemoryCoTPromptConstructor",
+		"keywords": ["url", "objective", "observation", "previous_action"],
+		"prompt_constructor": "CoTPromptConstructor",
 		"answer_phrase": "In summary, the next action I will perform is",
 		"action_splitter": "```"
 	},

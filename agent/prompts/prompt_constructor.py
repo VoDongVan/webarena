@@ -283,44 +283,5 @@ class CoTPromptConstructor(PromptConstructor):
 
 
 class MemoryCoTPromptConstructor(CoTPromptConstructor):
-    """CoT agent with optional retrieved-memory injection."""
-
-    def construct(
-        self,
-        trajectory: Trajectory,
-        intent: str,
-        meta_data: dict[str, Any] = {},
-    ) -> APIInput:
-        intro = self.instruction["intro"]
-        examples = self.instruction["examples"]
-        template = self.instruction["template"]
-        keywords = self.instruction["meta_data"]["keywords"]
-        state_info: StateInfo = trajectory[-1]  # type: ignore[assignment]
-
-        obs = state_info["observation"][self.obs_modality]
-        max_obs_length = self.lm_config.gen_config["max_obs_length"]
-        if max_obs_length:
-            obs = self.tokenizer.decode(self.tokenizer.encode(obs)[:max_obs_length])  # type: ignore[arg-type]
-
-        page = state_info["info"]["page"]
-        url = page.url
-        previous_action_str = meta_data["action_history"][-1]
-
-        retrieved = meta_data.pop("retrieved_memories", "")
-        if retrieved:
-            memories_block = f"RETRIEVED MEMORIES:\n{retrieved}\n\n"
-        else:
-            memories_block = ""
-
-        current = template.format(
-            objective=intent,
-            url=self.map_url_to_real(url),
-            observation=obs,
-            previous_action=previous_action_str,
-            memories=memories_block,
-        )
-
-        assert all([f"{{k}}" not in current for k in keywords])
-
-        prompt = self.get_lm_api_input(intro, examples, current)
-        return prompt
+    """CoT agent with memory tool support (retrieval happens via tool calls, not template injection)."""
+    pass
