@@ -1,0 +1,24 @@
+# WebArena memory retrieval smoke test — BM25 retriever, Qwen3.5-27B, first 10 tasks
+# Run: bash memorybank/submit_memory_experiment.sh memorybank/configs/webarena_memory_bm25_27b_test.yaml
+
+# --- LLM ---
+llm_config_name: qwen3_27b
+extraction_llm_config_name: null      # null = use main model for extraction
+
+# --- Retriever ---
+retriever_type: bm25
+retriever_port: 8020
+top_k: 3
+memories_init_path: ""                # empty = start fresh
+
+# --- Task selection ---
+test_start_idx: 0
+test_end_idx: 10
+
+# --- Output ---
+memory_save_path: "memorybank/memories/bm25_qwen3_27b/memories.json"
+result_dir: "memorybank/results_memory_bm25_27b_test"
+
+# --- SLURM ---
+# ~20 min startup + 10 tasks x ~5 min avg (27B) ≈ 70 min; 2h gives comfortable margin.
+wall_time: "2:00:00"

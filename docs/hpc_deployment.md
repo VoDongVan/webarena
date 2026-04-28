@@ -205,32 +205,83 @@ Defined in `browser_env/env_config.py`. For this deployment:
 
 ## Research Extension: Memory Retrieval
 
-**Agent-controlled memory retrieval is fully implemented.** The agent issues
-`retrieve_memory [query]` as an explicit action (costs 1 step); memories appear
-in the next observation under a `RETRIEVED MEMORIES:` header. After each task,
-an extraction LLM saves 1–3 generalizable `MemoryItem`s to the retriever server.
+Memory retrieval is implemented as **API-level tool calling**, not as a browser action.
+The LLM calls `retrieve_memory(query)` as an OpenAI function-calling tool inside
+`PromptAgent.next_action()`. The tool loop runs as many retrieval rounds as the model
+wants before it commits to a browser action. After each task, an extraction LLM distills
+1–3 generalizable lessons and saves them to the retriever server.
+
+### Architecture
+
+```
+PromptAgent.next_action()
+  tool loop:
+    call_llm(..., tools=[_RETRIEVE_MEMORY_TOOL])
+    if tool_call → memory_client.retrieve(query) → append result → repeat
+    else         → parse browser action → return
+
+run.py (after each task):
+  extract_and_save_memories(trajectory, intent, score)
+    → call_llm(extraction_lm_config, ...)  → parse _MemoryItem list
+    → memory_client.add_memories(items)
+    → memory_client.save_memories(memory_save_path)   ← periodic flush
+```
+
+Memories are flushed to disk after **every task** (not just at the end), so partial
+results survive job cancellation.
 
 ### Running with memory
 
-1. Start the retriever server (BM25) before submitting the experiment job:
-   ```bash
-   cd /scratch3/workspace/vdvo_umass_edu-CS696_S26/memorybank
-   python retrieval/server.py --retriever_type bm25 --port 8020
-   ```
+The `submit_memory_experiment.sh` script handles everything — use it instead of
+`submit_experiment.sh`:
 
-2. Pass memory args to `run.py` (or set them in your experiment YAML):
-   ```bash
-   --instruction_path agent/prompts/jsons/p_cot_id_actree_2s_memory.json
-   --retriever_server_url http://localhost:8020
-   --top_k 3
-   --extraction_model Qwen/Qwen3-8B   # optional; reuses main model if omitted
-   ```
+```bash
+cd webarena/memorybank
+bash submit_memory_experiment.sh configs/webarena_memory_bm25_27b_test.yaml
+```
 
-3. Baseline (no memory) experiments omit `--retriever_server_url` and use
-   `p_cot_id_actree_2s.json` as the instruction path.
+This submits a CPU services job that:
+1. Spins up all 6 WebArena services as separate SLURM jobs
+2. Polls until all services are healthy
+3. Submits the GPU job (`run_memory_experiment.sh`) with vLLM + the experiment
 
-See `MEMORY_ACTION_PLAN.md` (repo root) for the full design and
-`IMPLEMENTATION_PROGRESS.md` for the complete list of implemented files.
+The retriever server is started **inside** the GPU job automatically — no manual server
+launch needed.
+
+### vLLM flags required for tool calling
+
+```bash
+--enable-auto-tool-choice
+--tool-call-parser qwen3_xml    # Qwen3.5 generates XML-format tool calls
+--reasoning-parser qwen3        # strip <think> blocks
+```
+
+The parser must be `qwen3_xml` (underscore). `hermes` (JSON format) and `qwen3xml`
+(missing underscore) both fail for Qwen3.5 models.
+
+### Experiment configs
+
+| Config | Model | Tasks | Purpose |
+|---|---|---|---|
+| `webarena_memory_bm25_9b_test.yaml` | Qwen3.5-9B | 0–9 | Smoke test |
+| `webarena_memory_bm25_27b_test.yaml` | Qwen3.5-27B | 0–9 | Smoke test |
+| `webarena_memory_bm25_27b.yaml` | Qwen3.5-27B | 0–50 | Full run |
+
+### Memory storage
+
+Memories accumulate in the retriever server's in-memory BM25 index throughout the run.
+After each task's extraction, `save_memories` flushes the index to:
+
+```
+memorybank/memories/bm25_qwen3_27b/memories.json   # 27B run
+memorybank/memories/bm25_qwen3_9b/memories.json    # 9B run
+```
+
+Pass `--memories_init_path` to pre-load memories from a previous run.
+
+### Baseline (no memory)
+
+Omit `--retriever_server_url` and use `p_cot_id_actree_2s.json` (no `_memory` suffix).
 
 ---
 
@@ -245,3 +296,5 @@ See `MEMORY_ACTION_PLAN.md` (repo root) for the full design and
 | Shopping Admin node file never written | Magento cache flush or Elasticsearch slow to start | Job will retry health checks for 45 min; usually resolves |
 | `AssertionError` in evaluator / `ERR_CONNECTION_REFUSED` at end of run | WA service SLURM jobs (8h limit) expired before the agent job finished | Fixed: all service jobs now use 24h limit |
 | `AssertionError` or `AttributeError: 'NoneType'` in `llm_fuzzy_match` | Evaluator LLM response didn't contain `"correct"`/`"incorrect"` verbatim (Qwen thinks freely) | Fixed: prompts now explicitly demand a single-word verdict; `None` and unrecognized responses default to `0.0` |
+| `JSONDecodeError` in vLLM tool parser / tool calls never fire | Wrong `--tool-call-parser` flag. Qwen3.5 generates XML-format tool calls, not JSON. `hermes` expects JSON and silently drops calls | Use `--tool-call-parser qwen3_xml` (underscore required; `qwen3xml` is also invalid) |
+| `[MemoryExtraction] Failed: No module named 'qdrant_client'` | `memory/__init__.py` imports qdrant at load time; not installed in webarena env | Fixed: `_MemoryItem` defined locally in `agent.py`; `models/prompts.py` loaded via `importlib` to bypass `__init__.py` |

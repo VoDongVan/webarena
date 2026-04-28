@@ -142,21 +142,16 @@ while True:
 
     f. if action_type == STOP: break
 
-    g. if action_type == RETRIEVE_MEMORY:          ← memory branch
-          if memory_client:
-              memories = memory_client.retrieve(action["answer"], args.top_k)
-              meta_data["retrieved_memories"] = memories
-          trajectory.append(state_info)   ← re-append current state (browser unchanged)
-          continue                        ← skip env.step()
-
-    h. obs, _, terminated, _, info = env.step(action)
+    g. obs, _, terminated, _, info = env.step(action)
        state_info = {"observation": obs, "info": info}
        trajectory.append(state_info)
 
-    i. if terminated: inject STOP; break
+    h. if terminated: inject STOP; break
 ```
 
-`RETRIEVE_MEMORY` counts as one step toward `max_steps` but does not advance the browser.
+Note: `RETRIEVE_MEMORY` is no longer a browser action. Memory retrieval now happens
+entirely inside `agent.next_action()` via the OpenAI tool-calling API — `run.py` has
+no retrieval branch.
 
 **4. Evaluate**
 
@@ -170,7 +165,12 @@ score = evaluator(trajectory, config_file, env.page, client)
 ```python
 if memory_client and isinstance(agent, PromptAgent) and agent.extraction_lm_config:
     agent.extract_and_save_memories(trajectory, intent, score)
+    if args.memory_save_path:
+        memory_client.save_memories(args.memory_save_path)  # periodic flush
 ```
+
+Memories are saved to disk after **every task**, not just at the end of the run.
+This ensures partial results survive job cancellation or unexpected failures.
 
 **6. Log & save**
 
@@ -286,18 +286,19 @@ main()
               ├── loop:
               │     ├── early_stop()
               │     ├── agent.next_action()
-              │     │     ├── PromptConstructor.construct()  (MemoryCoT: injects memories)
-              │     │     ├── call_llm()             → vLLM / OpenAI / HuggingFace
+              │     │     ├── PromptConstructor.construct()
+              │     │     ├── [memory] tool loop:
+              │     │     │     call_llm(..., tools=[_RETRIEVE_MEMORY_TOOL])
+              │     │     │     if tool_call → memory_client.retrieve() → repeat
+              │     │     ├── [baseline] call_llm() → response string
               │     │     └── extract_action() + create_id_based_action()
-              │     ├── if RETRIEVE_MEMORY:
-              │     │     ├── memory_client.retrieve(query)
-              │     │     └── store in meta_data["retrieved_memories"], re-append state
-              │     ├── else: env.step(action)       → Playwright → Chromium
+              │     ├── env.step(action)             → Playwright → Chromium
               │     └── trajectory.append(...)
               ├── evaluator_router()(trajectory, page, ...)
               │     ├── StringEvaluator    (answer text)
               │     ├── URLEvaluator       (page.url)
               │     └── HTMLContentEvaluator (DOM content)
               └── [optional] agent.extract_and_save_memories(trajectory, intent, score)
-                    └── memory_client.add_memories(items)
+                    ├── memory_client.add_memories(items)
+                    └── memory_client.save_memories(path)   ← after every task
 ```

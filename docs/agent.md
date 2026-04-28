@@ -57,43 +57,72 @@ PromptAgent(
 
 ### `next_action()` Step-by-Step
 
+**Baseline path** (`memory_client is None`):
+
 ```
 1. prompt_constructor.construct(trajectory, intent, meta_data)
-      → formatted LLM input (OpenAI messages list or string)
-      (MemoryCoTPromptConstructor also pops meta_data["retrieved_memories"]
-       and prepends RETRIEVED MEMORIES: block when non-empty)
+      → OpenAI-format messages list
 
-2. call_llm(lm_config, prompt)
-      → raw LLM response string
-
-3. prepend force_prefix if set (e.g. "```" for Llama models)
-
-4. Retry loop (up to max_retry):
-      extract_action(response)         → action string, e.g. "click [42]"
-      create_id_based_action("click [42]")  → structured Action dict
+2. Retry loop (up to max_retry):
+      call_llm(lm_config, prompt)     → response string
+      prepend force_prefix if set
+      extract_action(response)        → "click [42]"
+      create_id_based_action(...)     → Action dict
       on ActionParsingError: retry
-      on max retries exceeded: return create_none_action()
-
-5. action["raw_prediction"] = response  (stored for logging)
-
-6. return Action
 ```
 
-### `extract_and_save_memories(trajectory, intent, score)` (`agent.py:165`)
+**Memory path** (`memory_client` is set — tool-calling loop):
+
+```
+1. prompt_constructor.construct(...)  → messages list (mutable copy)
+
+2. Tool loop:
+      call_llm(lm_config, messages, tools=[_RETRIEVE_MEMORY_TOOL])
+        → returns full message object (not a string)
+
+      if msg.tool_calls:
+          append assistant turn (with tool_calls) to messages
+          for each tool call:
+              parse query from tc.function.arguments
+              result = memory_client.retrieve(query, top_k)
+              append tool result message
+          continue (call LLM again with updated messages)
+
+      else:  ← no tool calls, model chose a browser action
+          response = force_prefix + msg.content
+          extract_action(response) → browser action string
+          break
+
+3. return Action
+```
+
+`call_llm` passes `tools` to `generate_from_openai_chat_completion`, which returns the full
+message object when tools are provided and a plain string otherwise. The tool loop can run
+multiple rounds — the LLM may call `retrieve_memory` several times before committing to an action.
+
+### `extract_and_save_memories(trajectory, intent, score)` (`agent.py:313`)
 
 Called by `run.py` after each task if `memory_client` and `extraction_lm_config` are set.
 
 ```
 1. Builds a text summary of the trajectory (objective + obs snippets + raw actions)
-2. Selects extraction prompt: "success_extraction" if score==1, else "failure_extraction"
-   (from memorybank/models/prompts.py → webarena_prompts dict)
-3. Calls call_llm(extraction_lm_config, prompt)
-4. Parses MemoryItem objects via MemoryItem.from_string(response)
-   (from memorybank/memory/memory_storage.py)
-5. Calls memory_client.add_memories(items)
+2. Selects prompt key: "success_extraction" if score==1, else "failure_extraction"
+3. Loads webarena_prompts from memorybank/models/prompts.py via importlib.util
+   (direct file load — bypasses models/__init__.py which imports fastembed/qdrant,
+    neither of which is installed in the webarena conda env)
+4. Calls call_llm(extraction_lm_config, messages)  → response string
+5. Parses _MemoryItem objects via _MemoryItem.from_string(response)
+   (_MemoryItem is defined locally in agent.py for the same dep-isolation reason)
+6. Calls memory_client.add_memories(items)
 ```
 
 Failures are silently swallowed — extraction never crashes the main loop.
+
+**Extraction prompts** (`memorybank/models/prompts.py → webarena_prompts`):
+- `"success_extraction"` — asks for transferable navigation strategies from a passing trajectory
+- `"failure_extraction"` — asks for failure lessons and warning signs from a failing trajectory
+- Both follow the SWE-Bench prompt style: "what makes a good memory / bad memory", analysis steps, and a concrete output format with `<extracted_memories>` tags
+- Output format: `# Memory Item N` → `## Title` / `## Context` / `## Content` blocks (no `## Polarity`)
 
 ### `construct_agent(args)` — Factory Function
 
@@ -169,21 +198,10 @@ The key difference is in the examples: each one ends with:
 
 ### MemoryCoTPromptConstructor (line 285)
 
-Subclass of `CoTPromptConstructor`. Used with the memory-enabled prompt (`p_cot_id_actree_2s_memory.py`).
-
-**`construct()`** — same as `CoTPromptConstructor` plus:
-1. Pops `meta_data["retrieved_memories"]` (cleared after this step so memories don't accumulate)
-2. If non-empty, prepends `RETRIEVED MEMORIES:\n{memories}\n\n` before the observation block
-3. Template must include `{memories}` as a keyword; empty string when no memories
-
-The template format:
-```
-{memories}OBSERVATION:
-{observation}
-URL: {url}
-OBJECTIVE: {objective}
-PREVIOUS ACTION: {previous_action}
-```
+Vestigial — no longer used for memory injection. Memory retrieval now happens inside
+`PromptAgent.next_action()` via API-level tool calls, not through the prompt template.
+This class remains in the codebase but its `construct()` is a no-op pass-through to
+`CoTPromptConstructor`.
 
 ---
 
@@ -198,7 +216,7 @@ Stored as Python dicts, converted to JSON via `to_json.py`. The JSON files land 
 | `p_direct_id_actree_2s_no_na.py` | `DirectPromptConstructor` | 2 | No N/A option for impossible tasks |
 | `p_cot_id_actree_2s_no_na.py` | `CoTPromptConstructor` | 2 | No N/A option for impossible tasks |
 | `p_direct_id_actree_3s_llama.py` | `DirectPromptConstructor` | 3 | Llama-2, has `force_prefix: "```"` |
-| `p_cot_id_actree_2s_memory.py` | `MemoryCoTPromptConstructor` | 2 | Adds `retrieve_memory` action + `{memories}` template slot |
+| `p_cot_id_actree_2s_memory.py` | `CoTPromptConstructor` | 2 | Adds `## Reasoning Memory` tool guidance; no `{memories}` slot — retrieval via tool call |
 
 ### What a Full Prompt Looks Like (CoT, OpenAI chat)
 
@@ -271,18 +289,23 @@ run.py
         │
         ├─ PromptConstructor.construct()
         │       tokenizer.encode(obs)[:max_obs_length]    truncate
-        │       [MemoryCoTPromptConstructor: pop retrieved_memories → prepend block]
         │       fill template → get_lm_api_input()
         │       → list of messages (vLLM / OpenAI format)
         │
-        ├─ call_llm(lm_config, messages)
-        │       → "...```click [42]```"  or  "...```retrieve_memory [query]```"
+        ├─ [memory path] tool-call loop:
+        │       call_llm(lm_config, messages, tools=[_RETRIEVE_MEMORY_TOOL])
+        │         → msg object
+        │       if msg.tool_calls:
+        │           memory_client.retrieve(query, top_k) → memory string
+        │           append tool result → repeat
+        │       else:
+        │           response = msg.content → proceed to action parse
         │
-        ├─ extract_action() → "click [42]" or "retrieve_memory [query]"
+        ├─ [baseline path]
+        │       call_llm(lm_config, messages)  → response string
+        │
+        ├─ extract_action(response) → "click [42]"
         │
         └─ create_id_based_action("click [42]")
                 → Action{action_type=CLICK, element_id="42", raw_prediction="..."}
-           create_id_based_action("retrieve_memory [query]")
-                → Action{action_type=RETRIEVE_MEMORY, answer="query", raw_prediction="..."}
-                   (run.py intercepts this — env.step() not called)
 ```

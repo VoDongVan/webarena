@@ -370,6 +370,8 @@ def test(
 
             if memory_client and isinstance(agent, PromptAgent) and agent.extraction_lm_config:
                 agent.extract_and_save_memories(trajectory, intent, score)
+                if args.memory_save_path:
+                    memory_client.save_memories(args.memory_save_path)
 
             if score == 1:
                 logger.info(f"[Result] (PASS) {config_file}")
@@ -510,4 +512,4 @@ if __name__ == "__main__":
             )
 
         if memory_client and args.memory_save_path:
-            memory_client.save_memories(args.memory_save_path)
+            memory_client.save_memories(args.memory_save_path)  # final flush (catches tasks without extraction_lm_config)
