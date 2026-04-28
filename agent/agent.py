@@ -31,13 +31,33 @@ _RETRIEVE_MEMORY_TOOL: dict[str, Any] = {
     "type": "function",
     "function": {
         "name": "retrieve_memory",
-        "description": "Search past experience for relevant memories.",
+        "description": (
+            "The memory retriever retrieves transferable reasoning strategies, "
+            "decision guidelines, failure-recovery lessons, and failure-prevention "
+            "lessons distilled from prior task attempts for the current task state "
+            "or subtask. Use it when planning or replanning a task or subtask, "
+            "before committing to an important action, or when progress is uncertain, "
+            "to get guidance on action selection and next-step reasoning."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Short phrase describing what to look up.",
+                    "description": (
+                        "A good query should specify: "
+                        "(1) the current task or subgoal, "
+                        "(2) the current environment state, relevant constraints, "
+                        "relevant observations from previous steps, and actions "
+                        "already tried for this subtask, "
+                        "(3) the decision, uncertainty, or failure mode you need "
+                        "help with, and "
+                        "(4) the kind of guidance you want, such as planning, search, "
+                        "recovery from failures, or failure prevention. "
+                        "Generate queries that ask for reusable reasoning and planning "
+                        "guidance based in the current task state, rather than asking "
+                        "for memories for task-specific facts or final answers."
+                    ),
                 }
             },
             "required": ["query"],
