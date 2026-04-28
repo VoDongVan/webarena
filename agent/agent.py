@@ -1,10 +1,13 @@
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 import tiktoken
+
+logger = logging.getLogger("logger")
 from beartype import beartype
 
 from agent.prompts import *
@@ -197,7 +200,9 @@ class PromptAgent(Agent):
                     })
                     for tc in msg.tool_calls:
                         query = json.loads(tc.function.arguments).get("query", "")
+                        logger.info(f"[MEMORY_CALL] query={query[:300]!r}")
                         result = self.memory_client.retrieve(query, self.top_k)
+                        logger.info(f"[MEMORY_RESULT] returned {len(result)} chars")
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
