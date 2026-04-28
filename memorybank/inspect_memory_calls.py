@@ -97,9 +97,10 @@ def parse_log(log_path: Path) -> list[dict]:
         m = re.search(r"\[MEMORY_CALL\] query=(.*)", line)
         if m:
             raw = m.group(1).strip()
-            # strip surrounding quotes
+            # strip surrounding quotes, then unescape inner backslash-escapes
             if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
                 raw = raw[1:-1]
+            raw = raw.replace("\\'", "'").replace('\\"', '"')
             pending_query = raw
             continue
 
@@ -246,8 +247,14 @@ def print_task(
             for line in fmt_mem(m, indent=10).splitlines():
                 print(f"  {line}")
             print()
+    elif hit_count > 0:
+        # Calls returned content but we have no provenance data (task extracted
+        # 0 memories, so no provenance entry was written for this task).
+        print(f"  (memory IDs unknown — {hit_count} call(s) returned content but this task")
+        print(f"   extracted 0 memories so no provenance was recorded)")
+        print()
     else:
-        print("  (no memories retrieved this task — bank was empty or no retrievals hit)")
+        print("  (no memories retrieved — bank was empty at start of this task)")
         print()
 
 
