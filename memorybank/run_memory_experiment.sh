@@ -114,7 +114,7 @@ start_vllm() {
         --dtype auto \
         --reasoning-parser qwen3 \
         --enable-auto-tool-choice \
-        --tool-call-parser qwen3xml \
+        --tool-call-parser qwen3_xml \
         --trust-remote-code \
         > "$PROJ/memorybank/logs/vllm_${SLURM_JOB_ID}.log" 2>&1 &
 
