@@ -265,10 +265,11 @@ class PromptAgent(Agent):
                             "tool_call_id": tc.id,
                             "content": result,
                         })
-                    continue
+                    # At most one retrieval per step — call without tools to force a browser action.
+                    response = f"{force_prefix}{call_llm(lm_config, messages) or ''}"
+                else:
+                    response = f"{force_prefix}{msg.content or ''}"
 
-                # No tool calls — parse the browser action.
-                response = f"{force_prefix}{msg.content or ''}"
                 n += 1
                 try:
                     parsed_response = self.prompt_constructor.extract_action(response)
