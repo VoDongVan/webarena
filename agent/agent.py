@@ -227,6 +227,8 @@ class PromptAgent(Agent):
         lm_config = self.lm_config
         force_prefix = self.prompt_constructor.instruction["meta_data"].get("force_prefix", "")
 
+        step = (len(trajectory) - 1) // 2
+
         if self.memory_client is not None:
             # Tool-calling path: retrieval happens in-step via the API tool loop.
             tools = [_RETRIEVE_MEMORY_TOOL]
@@ -257,7 +259,7 @@ class PromptAgent(Agent):
                         logger.info(f"[MEMORY_CALL] query={query[:300]!r}")
                         result = self.memory_client.retrieve(query, self.top_k)
                         logger.info(f"[MEMORY_RESULT] returned {len(result)} chars")
-                        self._memory_trace.append({"query": query, "retrieved": result})
+                        self._memory_trace.append({"step": step, "query": query, "retrieved": result})
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
