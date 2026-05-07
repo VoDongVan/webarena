@@ -1,0 +1,27 @@
+# WebArena memory retrieval run — Dense retriever, Qwen3.5-27B, first 300 tasks
+# Run: bash memorybank/submit_memory_experiment.sh memorybank/configs/webarena_memory_dense_27b_300tasks.yaml
+
+# --- LLM ---
+llm_config_name: qwen3_27b
+extraction_llm_config_name: null      # null = use main model for extraction
+
+# --- Retriever ---
+retriever_type: dense
+retriever_port: 8020
+top_k: 3
+memories_init_path: ""                # empty = start fresh
+
+# --- Embedding server (dense only) ---
+embedding_model: "BAAI/bge-large-en-v1.5"
+
+# --- Task selection ---
+test_start_idx: 0
+test_end_idx: 300
+
+# --- Output ---
+memory_save_path: "memorybank/memories/dense_qwen3_27b_300tasks/memories.json"
+result_dir: "memorybank/results_memory_dense_27b_300tasks"
+
+# --- SLURM ---
+# 2 GPUs requested automatically (generation + embedding). Same wall time as BM25.
+wall_time: "28:00:00"

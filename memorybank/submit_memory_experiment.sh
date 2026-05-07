@@ -60,6 +60,9 @@ if extraction_llm_name:
                .get("model_name", "")
     )
 
+embedding_model = cfg.get("embedding_model", "") or ""
+gpu_count = "2" if retriever_type == "dense" else "1"
+
 print(model)
 print(retriever_type)
 print(retriever_port)
@@ -71,6 +74,8 @@ print(test_end)
 print(memories_init)
 print(result_dir)
 print(wall_time)
+print(embedding_model)
+print(gpu_count)
 EOF
 )
 
@@ -85,6 +90,8 @@ TEST_END_IDX="${_values[7]}"
 MEMORIES_INIT_PATH="${_values[8]}"
 RESULT_DIR="${_values[9]}"
 WALL_TIME="${_values[10]:-}"
+EMBEDDING_MODEL="${_values[11]:-}"
+GPU_COUNT="${_values[12]:-1}"
 
 echo "Resolved model:          $MODEL_NAME"
 echo "Retriever type:          $RETRIEVER_TYPE  port: $RETRIEVER_PORT"
@@ -94,6 +101,8 @@ echo "Memory save path:        ${MEMORY_SAVE_PATH:-<none>}"
 echo "Memories init path:      ${MEMORIES_INIT_PATH:-<none>}"
 echo "Task range:              $TEST_START_IDX .. $TEST_END_IDX"
 echo "Result dir:              ${RESULT_DIR:-<default>}"
+[[ "$RETRIEVER_TYPE" == "dense" ]] && echo "Embedding model:         ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}"
+echo "GPU count:               $GPU_COUNT"
 
 ########################################
 # Map model → GPU constraint + time
@@ -154,7 +163,9 @@ RETRIEVER_PORT="$RETRIEVER_PORT",\
 TOP_K="$TOP_K",\
 EXTRACTION_MODEL="$EXTRACTION_MODEL",\
 MEMORY_SAVE_PATH="$MEMORY_SAVE_PATH",\
-MEMORIES_INIT_PATH="$MEMORIES_INIT_PATH" \
+MEMORIES_INIT_PATH="$MEMORIES_INIT_PATH",\
+EMBEDDING_MODEL="$EMBEDDING_MODEL",\
+GPU_COUNT="$GPU_COUNT" \
     "$PROJ/run_webarena_services.sh")
 
 echo "Submitted services job: $SVC_JOB_ID"

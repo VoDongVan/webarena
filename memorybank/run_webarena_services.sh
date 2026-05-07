@@ -18,6 +18,7 @@ CONFIG="${WEBARENA_CONFIG}"
 GPU_CONSTRAINT="${GPU_CONSTRAINT}"
 GPU_PARTITION="${GPU_PARTITION}"
 GPU_TIME="${GPU_TIME}"
+GPU_COUNT="${GPU_COUNT:-1}"
 # Which GPU script to run (defaults to baseline; memory experiment overrides this)
 GPU_SCRIPT="${GPU_SCRIPT:-$PROJ/memorybank/run_experiment.sh}"
 
@@ -82,6 +83,7 @@ GPU_JOB_ID=$(sbatch --parsable \
     --partition="$GPU_PARTITION" \
     --constraint="$GPU_CONSTRAINT" \
     --time="$GPU_TIME" \
+    --gpus="$GPU_COUNT" \
     --export=ALL,SVC_JOB_ID="$SLURM_JOB_ID" \
     "$GPU_SCRIPT")
 

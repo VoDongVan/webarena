@@ -29,6 +29,10 @@ EXTRACTION_MODEL="${EXTRACTION_MODEL:-}"
 MEMORY_SAVE_PATH="${MEMORY_SAVE_PATH:-}"
 MEMORIES_INIT_PATH="${MEMORIES_INIT_PATH:-}"
 
+# Dense retriever env vars (ignored for bm25)
+EMBEDDING_MODEL="${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}"
+EMBEDDING_PORT="${EMBEDDING_PORT:-8101}"
+
 echo "=== Starting memory job on $(hostname) at $(date) ==="
 echo "Config:           $CONFIG"
 echo "Model:            $VLLM_MODEL"
@@ -37,6 +41,7 @@ echo "Top-k:            $TOP_K"
 echo "Extraction model: ${EXTRACTION_MODEL:-<same as main>}"
 echo "Memory save path: ${MEMORY_SAVE_PATH:-<none>}"
 echo "Task range:       $TEST_START_IDX .. $TEST_END_IDX"
+[[ "$RETRIEVER_TYPE" == "dense" ]] && echo "Embedding model:  $EMBEDDING_MODEL  port: $EMBEDDING_PORT"
 
 ########################################
 # Cleanup
@@ -44,6 +49,7 @@ echo "Task range:       $TEST_START_IDX .. $TEST_END_IDX"
 cleanup() {
     echo "Cleaning up..."
     [[ -n "${VLLM_PID:-}" ]] && kill $VLLM_PID 2>/dev/null || true
+    [[ -n "${EMBEDDING_PID:-}" ]] && kill $EMBEDDING_PID 2>/dev/null || true
     [[ -n "${RETRIEVER_PID:-}" ]] && kill $RETRIEVER_PID 2>/dev/null || true
     [[ -n "${SVC_JOB_ID:-}" ]] && scancel "$SVC_JOB_ID" 2>/dev/null || true
 }
@@ -104,7 +110,7 @@ wait_for_services() {
 # vLLM startup
 ########################################
 start_vllm() {
-    python -m vllm.entrypoints.openai.api_server \
+    CUDA_VISIBLE_DEVICES=0 python -m vllm.entrypoints.openai.api_server \
         --model "$VLLM_MODEL" \
         --port 8010 \
         --host 0.0.0.0 \
@@ -133,11 +139,45 @@ start_vllm() {
 }
 
 ########################################
+# Embedding server startup (dense retriever only)
+########################################
+start_embedding_server() {
+    CUDA_VISIBLE_DEVICES=1 python -m vllm.entrypoints.openai.api_server \
+        --model "$EMBEDDING_MODEL" \
+        --port "$EMBEDDING_PORT" \
+        --host 0.0.0.0 \
+        --api-key abc \
+        --task embedding \
+        --gpu-memory-utilization 0.85 \
+        --dtype auto \
+        --trust-remote-code \
+        > "$PROJ/memorybank/logs/embedding_${SLURM_JOB_ID}.log" 2>&1 &
+
+    EMBEDDING_PID=$!
+
+    for i in $(seq 1 60); do
+        code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer abc" \
+            "http://localhost:${EMBEDDING_PORT}/v1/models" || true)
+
+        [[ "$code" == "200" ]] && return 0
+        sleep 30
+    done
+
+    return 1
+}
+
+########################################
 # Retrieval server startup
 ########################################
 start_retrieval_server() {
     local retriever_args="--port $RETRIEVER_PORT --retriever $RETRIEVER_TYPE"
     [[ -n "$MEMORIES_INIT_PATH" ]] && retriever_args+=" --memories $MEMORIES_INIT_PATH"
+    if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
+        retriever_args+=" --embedding-url http://localhost:${EMBEDDING_PORT}/v1/embeddings"
+        retriever_args+=" --embedding-model $EMBEDDING_MODEL"
+        retriever_args+=" --embedding-api-key abc"
+    fi
 
     python /scratch3/workspace/vdvo_umass_edu-CS696_S26/memorybank/retrieval/server.py \
         $retriever_args \
@@ -163,11 +203,19 @@ WA_PID=$!
 start_vllm &
 VLLM_INIT_PID=$!
 
+if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
+    start_embedding_server &
+    EMBEDDING_INIT_PID=$!
+fi
+
 start_retrieval_server &
 RETRIEVAL_INIT_PID=$!
 
 wait $WA_PID             || { echo "WebArena services not ready"; exit 1; }
 wait $VLLM_INIT_PID      || { echo "vLLM startup failed"; exit 1; }
+if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
+    wait $EMBEDDING_INIT_PID || { echo "Embedding server startup failed"; exit 1; }
+fi
 wait $RETRIEVAL_INIT_PID || { echo "Retrieval server startup failed"; exit 1; }
 
 echo "=== All services ready at $(date) ==="
