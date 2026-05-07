@@ -110,7 +110,7 @@ wait_for_services() {
 # vLLM startup
 ########################################
 start_vllm() {
-    CUDA_VISIBLE_DEVICES=0 python -m vllm.entrypoints.openai.api_server \
+    python -m vllm.entrypoints.openai.api_server \
         --model "$VLLM_MODEL" \
         --port 8010 \
         --host 0.0.0.0 \
@@ -142,14 +142,14 @@ start_vllm() {
 # Embedding server startup (dense retriever only)
 ########################################
 start_embedding_server() {
-    CUDA_VISIBLE_DEVICES=1 python -m vllm.entrypoints.openai.api_server \
+    python -m vllm.entrypoints.openai.api_server \
         --model "$EMBEDDING_MODEL" \
         --port "$EMBEDDING_PORT" \
         --host 0.0.0.0 \
         --api-key abc \
         --runner pooling \
-        --gpu-memory-utilization 0.85 \
-        --dtype auto \
+        --device cpu \
+        --dtype float32 \
         --trust-remote-code \
         > "$PROJ/memorybank/logs/embedding_${SLURM_JOB_ID}.log" 2>&1 &
 

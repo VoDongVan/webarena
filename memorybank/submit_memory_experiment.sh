@@ -61,7 +61,7 @@ if extraction_llm_name:
     )
 
 embedding_model = cfg.get("embedding_model", "") or ""
-gpu_count = "2" if retriever_type == "dense" else "1"
+gpu_count = "1"
 
 print(model)
 print(retriever_type)
