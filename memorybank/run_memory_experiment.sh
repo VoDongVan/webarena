@@ -147,7 +147,7 @@ start_embedding_server() {
         --port "$EMBEDDING_PORT" \
         --host 0.0.0.0 \
         --api-key abc \
-        --task embedding \
+        --runner pooling \
         --gpu-memory-utilization 0.85 \
         --dtype auto \
         --trust-remote-code \
