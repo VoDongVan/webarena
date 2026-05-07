@@ -17,27 +17,55 @@ from collections import defaultdict
 from pathlib import Path
 
 PROJ = Path(__file__).parent.parent
-LOG_DIR = PROJ / "memorybank" / "logs"
 CONFIG_DIR = PROJ / "config_files"
 
 
 # ---------------------------------------------------------------------------
-# Parse log files → {task_id: "PASS" | "FAIL"}
+# Outcome lookup — scoped to a single results directory
 # ---------------------------------------------------------------------------
 
-def parse_logs(log_dir: Path) -> dict[int, str]:
-    results: dict[int, str] = {}
-    log_files = sorted(log_dir.glob("wa_*.out"))
-    for log_path in log_files:
-        last_task = None
-        for line in log_path.read_text(errors="replace").splitlines():
-            m = re.search(r"\[Config file\].*?/(\d+)\.json", line)
-            if m:
-                last_task = int(m.group(1))
-            m = re.search(r"\[Result\] \((PASS|FAIL)\)", line)
-            if m and last_task is not None:
-                results[last_task] = m.group(1)
-    return results
+def load_outcomes(results_dir: Path) -> dict[int, str]:
+    """Return {task_id: "PASS"|"FAIL"} for the given results directory.
+
+    Priority:
+    1. result_{task_id}.json files written by run.py (present for runs after the fix)
+    2. Per-task log files listed in log_files.txt (present for all runs)
+    """
+    outcomes: dict[int, str] = {}
+
+    # Source 1: result_*.json (new runs)
+    for path in results_dir.glob("result_*.json"):
+        m = re.match(r"result_(\d+)\.json$", path.name)
+        if m:
+            try:
+                data = json.loads(path.read_text())
+                outcomes[int(m.group(1))] = data.get("outcome", "UNKNOWN")
+            except Exception:
+                pass
+
+    if outcomes:
+        return outcomes
+
+    # Source 2: per-task log files listed in log_files.txt (old runs)
+    log_files_index = results_dir / "log_files.txt"
+    if log_files_index.exists():
+        for rel_path in log_files_index.read_text().splitlines():
+            rel_path = rel_path.strip()
+            if not rel_path:
+                continue
+            log_path = PROJ / rel_path
+            if not log_path.exists():
+                continue
+            last_task = None
+            for line in log_path.read_text(errors="replace").splitlines():
+                m = re.search(r"\[Config file\].*?/(\d+)\.json", line)
+                if m:
+                    last_task = int(m.group(1))
+                m = re.search(r"\[Result\] \((PASS|FAIL)\)", line)
+                if m and last_task is not None:
+                    outcomes[last_task] = m.group(1)
+
+    return outcomes
 
 
 
@@ -90,7 +118,7 @@ def load_task_config(task_id: int) -> dict:
 # ---------------------------------------------------------------------------
 
 def analyze(results_dir: Path) -> list[dict]:
-    log_results = parse_logs(LOG_DIR)
+    log_results = load_outcomes(results_dir)
 
     render_files = sorted(
         results_dir.glob("render_*.html"),

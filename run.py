@@ -389,10 +389,10 @@ def test(
                         ensure_ascii=False,
                     )
 
-            if score == 1:
-                logger.info(f"[Result] (PASS) {config_file}")
-            else:
-                logger.info(f"[Result] (FAIL) {config_file}")
+            outcome = "PASS" if score == 1.0 else "FAIL"
+            with open(Path(args.result_dir) / f"result_{task_id}.json", "w") as f:
+                json.dump({"task_id": task_id, "outcome": outcome, "score": score}, f)
+            logger.info(f"[Result] ({outcome}) {config_file}")
 
             if args.save_trace_enabled:
                 env.save_trace(
