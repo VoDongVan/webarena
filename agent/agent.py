@@ -265,6 +265,16 @@ class PromptAgent(Agent):
                             "tool_call_id": tc.id,
                             "content": result,
                         })
+                    # Remind the model to output in the required action format, not tool-call XML.
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Memory retrieved. Now output your next browser action — "
+                            "do NOT call any tools. End your response with:\n"
+                            "In summary, the next action I will perform is "
+                            "```action [args]```"
+                        ),
+                    })
                     # At most one retrieval per step — call without tools to force a browser action.
                     response = f"{force_prefix}{call_llm(lm_config, messages) or ''}"
                 else:
