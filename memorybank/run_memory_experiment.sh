@@ -148,8 +148,8 @@ start_embedding_server() {
         --host 0.0.0.0 \
         --api-key abc \
         --runner pooling \
-        --device cpu \
-        --dtype float32 \
+        --gpu-memory-utilization 0.10 \
+        --dtype auto \
         --trust-remote-code \
         > "$PROJ/memorybank/logs/embedding_${SLURM_JOB_ID}.log" 2>&1 &
 
@@ -195,7 +195,8 @@ start_retrieval_server() {
 }
 
 ########################################
-# Parallel startup: wait for services + start vLLM + start retriever
+# Startup: wait for services + start vLLM + start retriever (parallel)
+# For dense: start embedding server only after vLLM generation is ready
 ########################################
 wait_for_services &
 WA_PID=$!
@@ -203,19 +204,18 @@ WA_PID=$!
 start_vllm &
 VLLM_INIT_PID=$!
 
-if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
-    start_embedding_server &
-    EMBEDDING_INIT_PID=$!
-fi
-
 start_retrieval_server &
 RETRIEVAL_INIT_PID=$!
 
 wait $WA_PID             || { echo "WebArena services not ready"; exit 1; }
 wait $VLLM_INIT_PID      || { echo "vLLM startup failed"; exit 1; }
+
 if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
+    start_embedding_server &
+    EMBEDDING_INIT_PID=$!
     wait $EMBEDDING_INIT_PID || { echo "Embedding server startup failed"; exit 1; }
 fi
+
 wait $RETRIEVAL_INIT_PID || { echo "Retrieval server startup failed"; exit 1; }
 
 echo "=== All services ready at $(date) ==="
