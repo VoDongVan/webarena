@@ -11,7 +11,7 @@ set -euo pipefail
 
 PROJ=/scratch3/workspace/vdvo_umass_edu-CS696_S26/webarena
 BUILDDIR=$PROJ/../webarena_build
-NODEDIR=$BUILDDIR/homepage
+NODEDIR="${NODEDIR:-$BUILDDIR/homepage}"
 
 # Passed via --export from submit_experiment.sh / submit_memory_experiment.sh
 CONFIG="${WEBARENA_CONFIG}"

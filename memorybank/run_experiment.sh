@@ -12,7 +12,7 @@ set -euo pipefail
 
 PROJ=/scratch3/workspace/vdvo_umass_edu-CS696_S26/webarena
 BUILDDIR=$PROJ/../webarena_build
-NODEDIR=$BUILDDIR/homepage
+NODEDIR="${NODEDIR:-$BUILDDIR/homepage}"
 
 CONFIG="${WEBARENA_CONFIG}"
 VLLM_MODEL="${MODEL_NAME}"
