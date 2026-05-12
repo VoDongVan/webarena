@@ -73,15 +73,18 @@ def load_outcomes(results_dir: Path) -> dict[int, str]:
 # Parse render HTML → step count + stop reason
 # ---------------------------------------------------------------------------
 
+_PARSED_ACTION_RE = re.compile(
+    r"<div class='parsed_action'[^>]*><pre>(.*?)</pre></div>", re.DOTALL
+)
+
+
 def parse_render(html_path: Path) -> dict:
     text = html_path.read_text(errors="replace")
 
     steps = text.count("<h2>New Page</h2>")
 
-    # Last parsed_action div contains the final action
     stop_reason = None
     stop_answer = None
-    # Find the last stop action
     stop_matches = re.findall(
         r"ActionTypes\.STOP[^}]*'answer':\s*'([^']*)'", text
     )
@@ -92,7 +95,23 @@ def parse_render(html_path: Path) -> dict:
         else:
             stop_reason = "agent_stop"
 
-    return {"steps": steps, "stop_reason": stop_reason, "stop_answer": stop_answer}
+    # For same-action failures, find the action that was repeated.
+    repeated_action = None
+    repeated_action_type = None
+    if stop_reason and "Same action" in stop_reason:
+        all_actions = [a.strip() for a in _PARSED_ACTION_RE.findall(text)]
+        non_stop = [a for a in all_actions if not a.startswith("stop [Early stop")]
+        if non_stop:
+            repeated_action = non_stop[-1]
+            repeated_action_type = repeated_action.split("[")[0].strip() if "[" in repeated_action else repeated_action.split()[0] if repeated_action.split() else repeated_action
+
+    return {
+        "steps": steps,
+        "stop_reason": stop_reason,
+        "stop_answer": stop_answer,
+        "repeated_action": repeated_action,
+        "repeated_action_type": repeated_action_type,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +168,8 @@ def analyze(results_dir: Path) -> list[dict]:
             "steps": render_info["steps"],
             "stop_reason": render_info["stop_reason"],
             "stop_answer": render_info["stop_answer"],
+            "repeated_action": render_info["repeated_action"],
+            "repeated_action_type": render_info["repeated_action_type"],
             "sites": task_cfg.get("sites", []),
             "intent": task_cfg.get("intent", ""),
             "eval_types": task_cfg.get("eval_types", []),
@@ -192,6 +213,31 @@ def print_summary(records: list[dict]) -> None:
     print("\n  Stop reasons:")
     for reason, count in sorted(stop_counts.items(), key=lambda x: -x[1]):
         print(f"    {reason:<45} {count:>4}  ({100*count/total:.1f}%)")
+
+    # Same-action failure detail
+    same_action_records = [
+        r for r in records
+        if r.get("stop_reason") and "Same action" in r["stop_reason"]
+    ]
+    if same_action_records:
+        print("\n" + "=" * 60)
+        print(f"SAME-ACTION FAILURES ({len(same_action_records)})")
+        print("=" * 60)
+
+        type_counts: dict[str, int] = defaultdict(int)
+        for r in same_action_records:
+            type_counts[r["repeated_action_type"] or "unknown"] += 1
+        print("  Repeated action type:")
+        for atype, cnt in sorted(type_counts.items(), key=lambda x: -x[1]):
+            print(f"    {atype:<20} {cnt:>4}  ({100*cnt/len(same_action_records):.1f}%)")
+
+        print(f"\n  {'ID':>4}  {'Site':<18}  {'Repeated action':<40}  Intent")
+        print(f"  {'--':>4}  {'-'*18}  {'-'*40}  {'-'*40}")
+        for r in same_action_records:
+            site = ", ".join(r["sites"]) if r["sites"] else "?"
+            action = (r["repeated_action"] or "")[:40]
+            intent = r["intent"][:60]
+            print(f"  {r['task_id']:>4}  {site:<18}  {action:<40}  {intent}")
 
     # Per-site breakdown
     site_stats: dict[str, dict] = defaultdict(lambda: {"total": 0, "pass": 0, "eval_error": 0})
@@ -298,7 +344,8 @@ def main():
         import csv
         fieldnames = [
             "task_id", "outcome", "has_eval_error",
-            "steps", "stop_reason", "stop_answer", "sites",
+            "steps", "stop_reason", "stop_answer",
+            "repeated_action", "repeated_action_type", "sites",
             "intent", "eval_types", "intent_template_id",
         ]
         with open(args.csv, "w", newline="") as f:

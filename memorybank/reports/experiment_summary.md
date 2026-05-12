@@ -202,7 +202,30 @@ the fix applied — not incremental additions to v1 memory.
 
 ---
 
-## 5. To-Do for Future Work
+## 5. Completed Fixes (Applied After v1/v2 Experiments)
+
+### Fix A — Correct scroll same-action early-stop *(applied 2026-05-12)*
+
+**File:** `run.py` — `early_stop()`
+
+The original early-stop for `scroll` was: terminate after 3 identical scroll directions.
+This is incorrect: consecutive `scroll [down]` actions are valid while the page is still
+moving. The agent should only be stopped if it's scrolling into a boundary (no content change).
+
+**Change:** For scroll actions, the same-action check now also verifies that the text
+observation before the k-scroll window equals the observation after. If content changed,
+scrolling was productive and the run continues. If not, the boundary was hit — stop as before.
+
+**Why this matters:** In baseline v2, 29/89 tasks (32.6%) were stopped by same-action
+triggers, all on long-content pages. These tasks should have continued.
+
+**Expected impact on v3+ runs:** Same-action stop rate drops from ~32% toward ~0% (only
+tasks that genuinely hit a boundary will stop). Affected tasks will instead run to
+`max_steps` (30), giving the agent more steps to find the answer.
+
+---
+
+## 6. To-Do for Future Work
 
 The following improvements are ordered by estimated impact.
 
@@ -281,7 +304,7 @@ per-site estimates and reduce noise in the headline pass rate.
 
 ---
 
-## 6. Summary
+## 7. Summary
 
 | | Baseline | BM25 v1 | BM25 v2 | Dense v1 | Dense v2 |
 |---|---|---|---|---|---|

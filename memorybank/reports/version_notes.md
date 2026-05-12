@@ -55,17 +55,55 @@ Retriever: dense embeddings via `BAAI/bge-large-en-v1.5` served on port 8101 (vL
 
 ---
 
+---
+
+## Behavioral Fix: Scroll Same-Action Early Stop (2026-05-12)
+
+**File:** `run.py` — `early_stop()`
+
+**Problem:** The original same-action early-stop treated `scroll [down]` repeated 3× as a
+stuck loop and terminated the task. This is wrong when the page is long: legitimate reading
+behavior requires many consecutive downward scrolls, and each one reveals new content.
+
+**Analysis:** In baseline v2 (89 tasks), 29 tasks (32.6%) were stopped by same-action. All
+29 were on long content pages (shopping admin analytics, reddit posts, gitlab issue lists)
+where the agent was genuinely progressing through the page.
+
+**Fix:** For `ActionTypes.SCROLL` only, the same-action check now also requires that the
+page text observation is identical before and after the scroll window. If content changed,
+the scroll was productive and the run continues. If content is unchanged (boundary reached),
+the run stops as before.
+
+```
+Before: stop after 3× scroll [down] regardless of page movement
+After:  stop after 3× scroll [down] only if the page did not move
+```
+
+All other action types (click, goto, type, etc.) retain the original k-consecutive behavior.
+
+**Expected impact:** Same-action stop rate should drop substantially (was 32.6% in baseline
+v2, 19.2% in baseline v1). Tasks that previously terminated early due to scroll will now
+run longer — up to max_steps (30) — giving the agent more time to find answers.
+
+**Applies to:** All experiments from v3 onward.
+
+---
+
 ## Summary Table
 
-| Experiment | Tasks | PASS% | Scroll fix | XML reminder |
-|---|---|---|---|---|
-| Baseline v1 | 213 | 21.1% | ✗ | N/A |
-| **Baseline v2** | 213 | TBD | **✓** | N/A |
-| BM25 v1 | 213 | 19.7% | ✗ | ✗ |
-| BM25 v2 | 213 | 22.1% | ✗ | **✓** |
-| Dense v1 | 213 | 18.3% | ✗ | ✗ |
-| Dense v2 | 213 | 19.7% | ✗ | **✓** |
+| Experiment | Tasks | PASS% | Scroll prompt | XML reminder | Scroll stop fix |
+|---|---|---|---|---|---|
+| Baseline v1 | 213 | 21.1% | ✗ | N/A | ✗ |
+| **Baseline v2** | 213 | TBD | **✓** | N/A | ✗ |
+| BM25 v1 | 213 | 19.7% | ✗ | ✗ | ✗ |
+| BM25 v2 | 213 | 22.1% | ✗ | **✓** | ✗ |
+| Dense v1 | 213 | 18.3% | ✗ | ✗ | ✗ |
+| Dense v2 | 213 | 19.7% | ✗ | **✓** | ✗ |
+| **Baseline v3** | TBD | TBD | **✓** | N/A | **✓** |
+| **BM25 v3** | TBD | TBD | **✓** | **✓** | **✓** |
+| **Dense v3** | TBD | TBD | **✓** | **✓** | **✓** |
 
 **Next logical runs** (not yet started as of 2026-05-12):
-- BM25 v3 and Dense v3: apply both the scroll fix and the XML reminder fix together.
-- These would be the first runs with both fixes applied simultaneously.
+- Baseline v3, BM25 v3, Dense v3: first runs with all three fixes applied together.
+- Key comparison: baseline v3 vs v2 isolates the scroll stop fix impact.
+- BM25/Dense v3 vs v2 measures the combined effect of scroll stop + scroll prompt fixes.

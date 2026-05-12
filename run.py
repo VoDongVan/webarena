@@ -221,7 +221,22 @@ def early_stop(
 
     last_action: Action = action_seq[-1]
 
-    if last_action["action_type"] != ActionTypes.TYPE:
+    if last_action["action_type"] == ActionTypes.SCROLL:
+        # Repeated scrolling is only a stuck loop if the page didn't actually
+        # move — i.e., the agent hit the top/bottom boundary. Compare the
+        # text observation before the first of the last-k scrolls to the
+        # current observation; identical means no content changed.
+        if len(last_k_actions) >= k and all(
+            is_equivalent(action, last_action) for action in last_k_actions
+        ):
+            states = trajectory[0::2]  # even indices are StateInfo objects
+            if len(states) >= k + 1:
+                obs_before = states[-(k + 1)].get("observation", {}).get("text", "")
+                obs_after = states[-1].get("observation", {}).get("text", "")
+                if obs_before and obs_after and obs_before == obs_after:
+                    return True, f"Same action for {k} times"
+
+    elif last_action["action_type"] != ActionTypes.TYPE:
         if len(last_k_actions) >= k:
             if all(
                 [
