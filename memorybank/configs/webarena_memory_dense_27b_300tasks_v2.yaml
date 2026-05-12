@@ -1,0 +1,28 @@
+# WebArena memory retrieval run — Dense retriever, Qwen3.5-27B, first 300 tasks
+# v2: re-run with parse-failure fix applied in agent/agent.py (user reminder message
+#     after tool result, before second call_llm, to stop XML tool-call format bleed-through)
+# Run: bash memorybank/submit_memory_experiment.sh memorybank/configs/webarena_memory_dense_27b_300tasks_v2.yaml
+
+# --- LLM ---
+llm_config_name: qwen3_27b
+extraction_llm_config_name: null      # null = use main model for extraction
+
+# --- Retriever ---
+retriever_type: dense
+retriever_port: 8020
+top_k: 3
+memories_init_path: ""                # start fresh, same as original run
+
+# --- Embedding server (dense only) ---
+embedding_model: "BAAI/bge-large-en-v1.5"
+
+# --- Task selection ---
+test_start_idx: 0
+test_end_idx: 300
+
+# --- Output ---
+memory_save_path: "memorybank/memories/dense_qwen3_27b_300tasks_v2/memories.json"
+result_dir: "memorybank/results_memory_dense_27b_300tasks_v2"
+
+# --- SLURM ---
+wall_time: "28:00:00"

@@ -250,6 +250,7 @@ def generate_from_openai_chat_completion(
     context_length: int,
     stop_token: str | None = None,
     tools: list[dict[str, Any]] | None = None,
+    enable_thinking: bool = True,
 ) -> Any:
     kwargs: dict[str, Any] = dict(
         model=model,
@@ -259,6 +260,8 @@ def generate_from_openai_chat_completion(
         top_p=top_p,
         stop=[stop_token] if stop_token else None,
     )
+    if not enable_thinking:
+        kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"

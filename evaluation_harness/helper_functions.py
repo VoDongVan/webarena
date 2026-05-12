@@ -172,6 +172,7 @@ def llm_fuzzy_match(pred: str, reference: str, question: str) -> float:
         max_tokens=128,
         top_p=1.0,
         context_length=0,
+        enable_thinking=False,
     )
     if not raw:
         return 0.0
@@ -217,6 +218,7 @@ def llm_ua_match(pred: str, reference: str, question: str) -> float:
         max_tokens=128,
         top_p=1.0,
         context_length=0,
+        enable_thinking=False,
     )
     if not raw:
         return 0.0

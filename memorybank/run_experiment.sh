@@ -98,7 +98,7 @@ start_vllm() {
         --gpu-memory-utilization 0.85 \
         --max-model-len 128000 \
         --enable-prefix-caching \
-        --enable-chunk-prefill \
+        --enable-chunked-prefill \
         --dtype auto \
         --reasoning-parser qwen3 \
         --trust-remote-code \

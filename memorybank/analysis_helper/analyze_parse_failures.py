@@ -29,7 +29,9 @@ _ACTION_BLOCK_RE = re.compile(
     re.DOTALL,
 )
 _RAW_PRED_RE = re.compile(r"'raw_prediction':\s*'((?:[^'\\]|\\.)*)'", re.DOTALL)
-_RAW_PRED_DQ_RE = re.compile(r"\"raw_prediction\":\s*\"((?:[^\"\\]|\\.)*)\"", re.DOTALL)
+# Python repr uses double-quoted value when the string contains a single quote (apostrophe).
+# The key is always single-quoted in Python dict repr, so we match 'raw_prediction': "..."
+_RAW_PRED_DQ_RE = re.compile(r"""'raw_prediction':\s*"((?:[^"\\]|\\.)*)"(?=[,}])""", re.DOTALL)
 _NONE_TYPE_RE = re.compile(r"ActionTypes\.NONE")
 
 
@@ -57,7 +59,7 @@ def extract_none_predictions(html: str) -> list[str]:
 # ── Categorisation ────────────────────────────────────────────────────────────
 
 _TOOL_CALL_RE = re.compile(r"<tool_call>", re.IGNORECASE)
-_BACKTICK_ACTION_RE = re.compile(r"```(\w[\w\s\[\]\-\.:/]*?)```")
+_BACKTICK_ACTION_RE = re.compile(r"```(\w[\w\s\[\]\-\.:=,/\"']*?)```")
 _ANSWER_PHRASE = "In summary, the next action I will perform is"
 _VALID_ACTIONS = {
     "click", "hover", "type", "press", "scroll", "goto",

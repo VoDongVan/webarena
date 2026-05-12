@@ -1,0 +1,16 @@
+# WebArena baseline — Qwen3.5-27B, first 300 tasks
+# v2: prompt fix — scroll [direction=down|up] → scroll [down|up] to match parser
+# Run: bash memorybank/submit_experiment.sh memorybank/configs/webarena_baseline_27b_300tasks_v2.yaml
+
+# --- LLM ---
+llm_config_name: qwen3_27b
+
+# --- Task selection ---
+test_start_idx: 0
+test_end_idx: 300
+
+# --- Output ---
+result_dir: "memorybank/results_baseline_27b_300tasks_v2"
+
+# --- SLURM ---
+wall_time: "20:00:00"
