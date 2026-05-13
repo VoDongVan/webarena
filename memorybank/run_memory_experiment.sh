@@ -153,6 +153,7 @@ start_embedding_server() {
         --api-key abc \
         --runner pooling \
         --gpu-memory-utilization 0.15 \
+        --max-model-len 4096 \
         --dtype auto \
         --trust-remote-code \
         > "$PROJ/memorybank/logs/embedding_${SLURM_JOB_ID}.log" 2>&1 &
@@ -201,7 +202,10 @@ start_retrieval_server() {
 ########################################
 # Startup: wait for services + start vLLM (parallel)
 # BM25: retrieval server also starts in parallel (no dependencies)
-# Dense: start embedding server in parallel with vLLM, then start retrieval server
+# Dense: vLLM must fully commit its GPU memory before embedding server starts,
+# otherwise the concurrent profiling passes cause negative available KV cache.
+# So for dense: wait for vLLM first, then start embedding server sequentially.
+# BM25: retrieval server has no GPU dependency, start in parallel with vLLM.
 ########################################
 wait_for_services &
 WA_PID=$!
@@ -209,10 +213,7 @@ WA_PID=$!
 start_vllm &
 VLLM_INIT_PID=$!
 
-if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
-    start_embedding_server &
-    EMBEDDING_INIT_PID=$!
-else
+if [[ "$RETRIEVER_TYPE" != "dense" ]]; then
     start_retrieval_server &
     RETRIEVAL_INIT_PID=$!
 fi
@@ -221,6 +222,8 @@ wait $WA_PID             || { echo "WebArena services not ready"; exit 1; }
 wait $VLLM_INIT_PID      || { echo "vLLM startup failed"; exit 1; }
 
 if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
+    start_embedding_server &
+    EMBEDDING_INIT_PID=$!
     wait $EMBEDDING_INIT_PID || { echo "Embedding server startup failed"; exit 1; }
     start_retrieval_server &
     RETRIEVAL_INIT_PID=$!

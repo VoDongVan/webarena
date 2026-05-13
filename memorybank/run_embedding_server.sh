@@ -4,7 +4,8 @@
 #SBATCH -N 1
 #SBATCH -c 4
 #SBATCH --mem=16G
-#SBATCH --gres=gpu:l40s:1
+#SBATCH --gres=gpu:1
+#SBATCH --constraint=vram40|vram48|vram80
 #SBATCH -t 30:00:00
 #SBATCH -o /scratch3/workspace/vdvo_umass_edu-CS696_S26/webarena/memorybank/logs/wa_embed_%j.out
 #SBATCH --mail-type=NONE

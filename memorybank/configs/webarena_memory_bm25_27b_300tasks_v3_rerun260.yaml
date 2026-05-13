@@ -1,0 +1,27 @@
+# BM25 re-run of tasks 260–299 only (eval-error recovery)
+# The original v3 run (tasks 0–299) produced 33 UNKNOWN eval errors concentrated
+# in tasks 260–299, caused by a suspected WebArena service hostname rotation.
+# This config re-runs those 40 tasks with memories pre-loaded from the completed
+# portion of the original run (tasks 0–259 worth of memories).
+# Run: bash memorybank/submit_memory_experiment.sh memorybank/configs/webarena_memory_bm25_27b_300tasks_v3_rerun260.yaml
+
+# --- LLM ---
+llm_config_name: qwen3_27b
+extraction_llm_config_name: null
+
+# --- Retriever ---
+retriever_type: bm25
+retriever_port: 8020
+top_k: 3
+memories_init_path: "memorybank/memories/bm25_qwen3_27b_300tasks_v3/memories.json"
+
+# --- Task selection ---
+test_start_idx: 260
+test_end_idx: 300
+
+# --- Output ---
+memory_save_path: "memorybank/memories/bm25_qwen3_27b_300tasks_v3_rerun260/memories.json"
+result_dir: "memorybank/results_memory_bm25_27b_300tasks_v3_rerun260"
+
+# --- SLURM ---
+wall_time: "5:00:00"
