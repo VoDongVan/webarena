@@ -4,6 +4,11 @@
 **Benchmark:** WebArena, tasks 0–212 (300 submitted, 213 reached evaluation)  
 **Variant tag:** v3 — scroll same-action early-stop fix applied to both runs  
 
+**Changes in v3:**
+Bug in original prompt: Original prompt of WebArena instructs the model to use "scroll [direction=down|up]", but the expected action is "scroll [down|up]" => model cannot scroll
+In v3, scroll up and down does not counted as repeated action, unless the environment does not change after actions. This is an issue for tasks that required long scrolling.
+After fixing the 2 bugs, both baseline and BM25 performance improve significantly.
+
 ---
 
 ## 1. Executive Summary
