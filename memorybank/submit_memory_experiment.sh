@@ -61,6 +61,7 @@ if extraction_llm_name:
     )
 
 embedding_model = cfg.get("embedding_model", "") or ""
+embedding_port  = str(cfg.get("embedding_port", 8101))
 gpu_count = "1"
 
 print(model)
@@ -76,6 +77,7 @@ print(result_dir)
 print(wall_time)
 print(embedding_model)
 print(gpu_count)
+print(embedding_port)
 EOF
 )
 
@@ -92,6 +94,7 @@ RESULT_DIR="${_values[9]}"
 WALL_TIME="${_values[10]:-}"
 EMBEDDING_MODEL="${_values[11]:-}"
 GPU_COUNT="${_values[12]:-1}"
+EMBEDDING_PORT="${_values[13]:-8101}"
 
 echo "Resolved model:          $MODEL_NAME"
 echo "Retriever type:          $RETRIEVER_TYPE  port: $RETRIEVER_PORT"
@@ -103,6 +106,7 @@ echo "Task range:              $TEST_START_IDX .. $TEST_END_IDX"
 echo "Result dir:              ${RESULT_DIR:-<default>}"
 [[ "$RETRIEVER_TYPE" == "dense" ]] && echo "Embedding model:         ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}"
 echo "GPU count:               $GPU_COUNT"
+[[ "$RETRIEVER_TYPE" == "dense" ]] && echo "Embedding port:          $EMBEDDING_PORT"
 
 ########################################
 # Map model → GPU constraint + time
@@ -142,6 +146,21 @@ echo "Selected time:           $TIME"
 echo "Selected partition:      $PARTITION"
 
 ########################################
+# For dense retriever: submit embedding server job on a separate GPU node
+########################################
+EMBEDDING_JOB_ID=""
+if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
+    EMBEDDING_JOB_ID=$(sbatch --parsable \
+        --job-name="wa_embed_$(basename "$CONFIG_PATH" .yaml)" \
+        --export=ALL,\
+EMBEDDING_MODEL="${EMBEDDING_MODEL:-AQ-MedAI/Diver-Retriever-4B}",\
+EMBEDDING_PORT="$EMBEDDING_PORT",\
+NODEDIR="${NODEDIR:-}" \
+        "$PROJ/run_embedding_server.sh")
+    echo "Submitted embedding server job: $EMBEDDING_JOB_ID"
+fi
+
+########################################
 # Submit single CPU job: launches services, polls health, then submits GPU job
 ########################################
 SVC_JOB_ID=$(sbatch --parsable \
@@ -166,6 +185,8 @@ MEMORY_SAVE_PATH="$MEMORY_SAVE_PATH",\
 MEMORIES_INIT_PATH="$MEMORIES_INIT_PATH",\
 EMBEDDING_MODEL="$EMBEDDING_MODEL",\
 GPU_COUNT="$GPU_COUNT",\
+EMBEDDING_JOB_ID="$EMBEDDING_JOB_ID",\
+EMBEDDING_PORT="$EMBEDDING_PORT",\
 NODEDIR="${NODEDIR:-}" \
     "$PROJ/run_webarena_services.sh")
 

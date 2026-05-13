@@ -21,6 +21,14 @@ GPU_TIME="${GPU_TIME}"
 GPU_COUNT="${GPU_COUNT:-1}"
 # Which GPU script to run (defaults to baseline; memory experiment overrides this)
 GPU_SCRIPT="${GPU_SCRIPT:-$PROJ/memorybank/run_experiment.sh}"
+RETRIEVER_TYPE="${RETRIEVER_TYPE:-bm25}"
+EMBEDDING_JOB_ID="${EMBEDDING_JOB_ID:-}"
+EMBEDDING_PORT="${EMBEDDING_PORT:-8101}"
+
+cleanup_svc() {
+    [[ -n "$EMBEDDING_JOB_ID" ]] && scancel "$EMBEDDING_JOB_ID" 2>/dev/null || true
+}
+trap cleanup_svc EXIT
 
 echo "=== Starting WebArena services on $(hostname) at $(date) ==="
 
@@ -74,6 +82,30 @@ for attempt in $(seq 1 360); do
 
     sleep 15
 done
+
+########################################
+# For dense retriever: also wait for embedding server node to be ready
+########################################
+if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
+    echo "=== Waiting for embedding server (NODEDIR=$NODEDIR) ==="
+    for attempt in $(seq 1 60); do
+        if [[ -f "$NODEDIR/.embedding_node" ]]; then
+            emb_host=$(cat "$NODEDIR/.embedding_node")
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+                -H "Authorization: Bearer abc" \
+                "http://${emb_host}:${EMBEDDING_PORT}/v1/models" 2>/dev/null || true)
+            if [[ "$code" == "200" ]]; then
+                echo "Embedding server ready on $emb_host (attempt $attempt)"
+                break
+            fi
+        fi
+        if [[ $attempt -eq 60 ]]; then
+            echo "ERROR: Embedding server not ready after 30 minutes. Aborting."
+            exit 1
+        fi
+        sleep 30
+    done
+fi
 
 ########################################
 # Submit GPU experiment job now that services are healthy
