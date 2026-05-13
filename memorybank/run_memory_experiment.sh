@@ -33,8 +33,8 @@ MEMORIES_INIT_PATH="${MEMORIES_INIT_PATH:-}"
 # Dense retriever env vars (ignored for bm25)
 EMBEDDING_MODEL="${EMBEDDING_MODEL:-AQ-MedAI/Diver-Retriever-4B}"
 EMBEDDING_PORT="${EMBEDDING_PORT:-8101}"
-EMBEDDING_JOB_ID="${EMBEDDING_JOB_ID:-}"
-EMBEDDING_HOST=""  # set by wait_for_embedding_node()
+EMBEDDING_PID=""
+EMBEDDING_HOST="localhost"
 
 echo "=== Starting memory job on $(hostname) at $(date) ==="
 echo "Config:           $CONFIG"
@@ -53,7 +53,7 @@ cleanup() {
     echo "Cleaning up..."
     [[ -n "${VLLM_PID:-}" ]] && kill $VLLM_PID 2>/dev/null || true
     [[ -n "${RETRIEVER_PID:-}" ]] && kill $RETRIEVER_PID 2>/dev/null || true
-    [[ -n "${EMBEDDING_JOB_ID:-}" ]] && scancel "$EMBEDDING_JOB_ID" 2>/dev/null || true
+    [[ -n "${EMBEDDING_PID:-}" ]] && kill $EMBEDDING_PID 2>/dev/null || true
     [[ -n "${SVC_JOB_ID:-}" ]] && scancel "$SVC_JOB_ID" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -118,7 +118,7 @@ start_vllm() {
         --port 8010 \
         --host 0.0.0.0 \
         --api-key abc \
-        --gpu-memory-utilization 0.85 \
+        --gpu-memory-utilization 0.80 \
         --max-model-len 128000 \
         --dtype auto \
         --reasoning-parser qwen3 \
@@ -142,24 +142,29 @@ start_vllm() {
 }
 
 ########################################
-# Embedding node discovery (dense retriever only)
-# Blocks until the remote embedding server is healthy, then sets EMBEDDING_HOST.
+# Embedding server startup (dense only — co-located on same A100 node)
+# 27B at 0.80 (64 GB) + Diver-4B at 0.15 (12 GB) = 76 GB / 80 GB
 ########################################
-wait_for_embedding_node() {
-    local node_file="$NODEDIR/.embedding_node"
-    for i in $(seq 1 20); do
-        if [[ -f "$node_file" ]]; then
-            local host
-            host=$(cat "$node_file")
-            local code
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
-                -H "Authorization: Bearer abc" \
-                "http://${host}:${EMBEDDING_PORT}/v1/models" 2>/dev/null || true)
-            if [[ "$code" == "200" ]]; then
-                EMBEDDING_HOST="$host"
-                echo "Embedding server confirmed ready at ${host}:${EMBEDDING_PORT}"
-                return 0
-            fi
+start_embedding_server() {
+    python -m vllm.entrypoints.openai.api_server \
+        --model "$EMBEDDING_MODEL" \
+        --port "$EMBEDDING_PORT" \
+        --host 0.0.0.0 \
+        --api-key abc \
+        --runner pooling \
+        --gpu-memory-utilization 0.15 \
+        --dtype auto \
+        --trust-remote-code \
+        > "$PROJ/memorybank/logs/embedding_${SLURM_JOB_ID}.log" 2>&1 &
+    EMBEDDING_PID=$!
+
+    for i in $(seq 1 60); do
+        code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer abc" \
+            "http://localhost:${EMBEDDING_PORT}/v1/models" || true)
+        if [[ "$code" == "200" ]]; then
+            echo "Embedding server ready after $((i * 30))s"
+            return 0
         fi
         sleep 30
     done
@@ -196,7 +201,7 @@ start_retrieval_server() {
 ########################################
 # Startup: wait for services + start vLLM (parallel)
 # BM25: retrieval server also starts in parallel (no dependencies)
-# Dense: confirm remote embedding node healthy, then start retrieval server
+# Dense: start embedding server in parallel with vLLM, then start retrieval server
 ########################################
 wait_for_services &
 WA_PID=$!
@@ -204,7 +209,10 @@ WA_PID=$!
 start_vllm &
 VLLM_INIT_PID=$!
 
-if [[ "$RETRIEVER_TYPE" != "dense" ]]; then
+if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
+    start_embedding_server &
+    EMBEDDING_INIT_PID=$!
+else
     start_retrieval_server &
     RETRIEVAL_INIT_PID=$!
 fi
@@ -213,7 +221,7 @@ wait $WA_PID             || { echo "WebArena services not ready"; exit 1; }
 wait $VLLM_INIT_PID      || { echo "vLLM startup failed"; exit 1; }
 
 if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
-    wait_for_embedding_node  || { echo "Embedding server not ready"; exit 1; }
+    wait $EMBEDDING_INIT_PID || { echo "Embedding server startup failed"; exit 1; }
     start_retrieval_server &
     RETRIEVAL_INIT_PID=$!
 fi

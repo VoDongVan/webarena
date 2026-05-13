@@ -146,21 +146,6 @@ echo "Selected time:           $TIME"
 echo "Selected partition:      $PARTITION"
 
 ########################################
-# For dense retriever: submit embedding server job on a separate GPU node
-########################################
-EMBEDDING_JOB_ID=""
-if [[ "$RETRIEVER_TYPE" == "dense" ]]; then
-    EMBEDDING_JOB_ID=$(sbatch --parsable \
-        --job-name="wa_embed_$(basename "$CONFIG_PATH" .yaml)" \
-        --export=ALL,\
-EMBEDDING_MODEL="${EMBEDDING_MODEL:-AQ-MedAI/Diver-Retriever-4B}",\
-EMBEDDING_PORT="$EMBEDDING_PORT",\
-NODEDIR="${NODEDIR:-}" \
-        "$PROJ/run_embedding_server.sh")
-    echo "Submitted embedding server job: $EMBEDDING_JOB_ID"
-fi
-
-########################################
 # Submit single CPU job: launches services, polls health, then submits GPU job
 ########################################
 SVC_JOB_ID=$(sbatch --parsable \
@@ -185,7 +170,6 @@ MEMORY_SAVE_PATH="$MEMORY_SAVE_PATH",\
 MEMORIES_INIT_PATH="$MEMORIES_INIT_PATH",\
 EMBEDDING_MODEL="$EMBEDDING_MODEL",\
 GPU_COUNT="$GPU_COUNT",\
-EMBEDDING_JOB_ID="$EMBEDDING_JOB_ID",\
 EMBEDDING_PORT="$EMBEDDING_PORT",\
 NODEDIR="${NODEDIR:-}" \
     "$PROJ/run_webarena_services.sh")
