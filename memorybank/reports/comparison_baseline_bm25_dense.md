@@ -106,7 +106,7 @@ With thinking mode enabled (all v3 runs), Qwen3-27B generates `retrieve_memory(q
 
 | Version | Model | Baseline | BM25 | Dense | Common N |
 |---|---|---|---|---|---|
-| v1 (Apr) | Qwen3-30B-A3B-FP8 | 21.6% | 20.2% | 18.8% | 208 |
+| v1 (Apr) | Qwen3-27B | 21.6% | 20.2% | 18.8% | 208 |
 | v2 (May) | Qwen3-27B | — | — | — | — |
 | **v3 (May 16)** | **Qwen3-27B** | **21.8%** | **24.6%** | **28.4%** | **211** |
 
