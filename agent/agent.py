@@ -255,10 +255,14 @@ class PromptAgent(Agent):
                         ],
                     })
                     for tc in msg.tool_calls:
-                        query = json.loads(tc.function.arguments).get("query", "")
+                        query = json.loads(tc.function.arguments).get("query", "").strip()
                         logger.info(f"[MEMORY_CALL] query={query[:300]!r}")
-                        result = self.memory_client.retrieve(query, self.top_k)
-                        logger.info(f"[MEMORY_RESULT] returned {len(result)} chars")
+                        if not query:
+                            logger.warning(f"[MEMORY_CALL] Empty query at step {step}, skipping retrieval")
+                            result = ""
+                        else:
+                            result = self.memory_client.retrieve(query, self.top_k)
+                            logger.info(f"[MEMORY_RESULT] returned {len(result)} chars")
                         self._memory_trace.append({"step": step, "query": query, "retrieved": result})
                         messages.append({
                             "role": "tool",
