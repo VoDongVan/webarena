@@ -111,7 +111,4 @@ With thinking mode enabled (all v3 runs), Qwen3-27B generates `retrieve_memory(q
 | **v3 (May 16)** | **Qwen3-27B** | **21.8%** | **24.6%** | **28.4%** | **211** |
 
 v3 is the first version where memory retrieval consistently beats baseline. Key changes from v1:
-- Model: switched from MoE (30B-A3B) to dense (27B) — better tool-call compliance
-- Thinking mode enabled
-- BM25 memory bank enriched with ~300 tasks of trajectories before run
 - Dense retriever: Diver-4B (AQ-MedAI/Diver-Retriever-4B) instead of BGE
